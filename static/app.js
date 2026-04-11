@@ -309,35 +309,85 @@
         $('#bulk-prog-fill').style.width = '0%';
         $('#bulk-prog-lbl').textContent = 'Đang xử lý...';
 
-        const fd = new FormData();
-        bulkFiles.forEach(f => fd.append('files', f));
+        let currentBatch = 0;
+        const BATCH_SIZE = 80;
+        const totalFiles = bulkFiles.length;
+        
+        let globalChecked = 0;
+        let globalLive = 0;
+        let globalDead = 0;
+        let globalError = 0;
 
-        fetch('/api/check-bulk', { method: 'POST', body: fd })
-            .then(res => {
-                const reader = res.body.getReader();
-                const decoder = new TextDecoder();
-                let buf = '';
-
-                function readStream() {
-                    reader.read().then(({done, value}) => {
-                        if (done) { setLoading('#btn-run-bulk', false); return; }
-                        buf += decoder.decode(value, {stream: true});
-                        let parts = buf.split('\n\n');
-                        buf = parts.pop() || '';
-                        parts.forEach(p => {
-                            if (p.startsWith('data: ')) {
-                                try { handleBulkSSE(JSON.parse(p.substring(6))); } catch(e){}
-                            }
-                        });
-                        readStream();
-                    });
-                }
-                readStream();
-            })
-            .catch(e => {
-                toast('Lỗi tải tệp lên: ' + e.message, 'error');
+        function processNextBatch() {
+            if (currentBatch * BATCH_SIZE >= totalFiles) {
                 setLoading('#btn-run-bulk', false);
-            });
+                $('#bulk-prog-lbl').textContent = 'Xong';
+                toast(`Đã xử lý xong ${totalFiles} tệp.`, 'success');
+                const hasLive = bulkResults.some(item => item.result.status === 'LIVE');
+                if (hasLive) {
+                    $('#btn-save-to-storage').style.display = 'block';
+                }
+                return;
+            }
+
+            const offset = currentBatch * BATCH_SIZE;
+            const batchFiles = bulkFiles.slice(offset, offset + BATCH_SIZE);
+            const fd = new FormData();
+            batchFiles.forEach(f => fd.append('files', f));
+
+            fetch('/api/check-bulk', { method: 'POST', body: fd })
+                .then(res => {
+                    const reader = res.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buf = '';
+
+                    function readStream() {
+                        reader.read().then(({done, value}) => {
+                            if (done) { 
+                                currentBatch++;
+                                processNextBatch();
+                                return; 
+                            }
+                            buf += decoder.decode(value, {stream: true});
+                            let parts = buf.split('\n\n');
+                            buf = parts.pop() || '';
+                            parts.forEach(p => {
+                                if (p.startsWith('data: ')) {
+                                    try { 
+                                        let d = JSON.parse(p.substring(6));
+                                        if (d.type === 'result') {
+                                            globalChecked++;
+                                            if (d.result.status === 'LIVE') globalLive++;
+                                            else if (d.result.status === 'DEAD') globalDead++;
+                                            else globalError++;
+
+                                            handleBulkSSE({
+                                                type: 'result',
+                                                checked: globalChecked,
+                                                total: totalFiles,
+                                                live: globalLive,
+                                                dead: globalDead,
+                                                error: globalError,
+                                                index: offset + d.index,
+                                                result: d.result
+                                            });
+                                        }
+                                    } catch(e){}
+                                }
+                            });
+                            readStream();
+                        });
+                    }
+                    readStream();
+                })
+                .catch(e => {
+                    toast('Lỗi batch ' + (currentBatch + 1) + ': ' + e.message, 'error');
+                    currentBatch++; // Skip this batch and try next
+                    processNextBatch();
+                });
+        }
+        
+        processNextBatch();
     });
 
     function handleBulkSSE(d) {
@@ -457,15 +507,6 @@
             $('#bulk-tbody').appendChild(tr);
             $('#bulk-tbody').appendChild(detailTr);
 
-        } else if (d.type === 'complete') {
-            setLoading('#btn-run-bulk', false);
-            $('#bulk-prog-lbl').textContent = 'Xong';
-            toast(`Đã xử lý xong ${d.total} tệp.`, 'success');
-
-            const hasLive = bulkResults.some(item => item.result.status === 'LIVE');
-            if (hasLive) {
-                $('#btn-save-to-storage').style.display = 'block';
-            }
         }
     }
 
