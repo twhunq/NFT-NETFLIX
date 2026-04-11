@@ -4,6 +4,8 @@ import json
 import queue
 import os
 import threading
+import uuid
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 # Import core logic from main.py
@@ -149,6 +151,12 @@ def process_cookie(cookie_input, generate_token=True):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/api/docs')
+def api_docs():
+    base_url = request.url_root.rstrip('/')
+    return render_template('api_docs.html', base_url=base_url)
 
 
 @app.route('/api/check-single', methods=['POST'])
@@ -322,6 +330,392 @@ def api_tv_login():
             'email': info.get('email', '-'),
         }
     })
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Cookie Storage System (Supabase)
+# ══════════════════════════════════════════════════════════════════════
+
+import requests
+
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://tcugrnqbptpbhmqldkyf.supabase.co')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'sb_publishable_W85BICZbBeNOZyyZS9XBLQ_Njn4gY6K')
+
+def _supabase_headers(extra_headers=None):
+    headers = {
+        'apikey': SUPABASE_KEY,
+        'Authorization': f'Bearer {SUPABASE_KEY}',
+        'Content-Type': 'application/json'
+    }
+    if extra_headers:
+        headers.update(extra_headers)
+    return headers
+
+
+@app.route('/api/storage/save', methods=['POST'])
+def api_storage_save():
+    """Save a valid cookie to Supabase storage."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body is required'}), 400
+
+    entry = {
+        'savedAt': datetime.utcnow().isoformat() + 'Z',
+        'cookie': data.get('cookie', ''),
+        'plan': data.get('plan', '-'),
+        'country': data.get('country', '-'),
+        'email': data.get('email', '-'),
+        'owner': data.get('owner', '-'),
+        'profiles': data.get('profiles', '-'),
+        'numProfiles': data.get('numProfiles', 0),
+        'billing': data.get('billing', '-'),
+        'login_link': data.get('login_link', ''),
+        'nftoken': data.get('nftoken', ''),
+        'videoQuality': data.get('videoQuality', '-'),
+        'maxStreams': data.get('maxStreams', '-'),
+        'label': data.get('label', ''),
+    }
+
+    # Fetch existing cookies (only ids and cookies text) to check for duplicates
+    url = f"{SUPABASE_URL}/rest/v1/cookies?select=id,cookie"
+    r = requests.get(url, headers=_supabase_headers())
+    existing_id = None
+    
+    if r.status_code == 200:
+        existing_list = r.json()
+        cookie_text = entry['cookie'].strip()
+        for item in existing_list:
+            if item.get('cookie', '').strip() == cookie_text:
+                existing_id = item.get('id')
+                break
+
+    if existing_id:
+        # Update existing
+        update_url = f"{SUPABASE_URL}/rest/v1/cookies?id=eq.{existing_id}"
+        resp = requests.patch(update_url, headers=_supabase_headers(), json=entry)
+        if resp.status_code in (200, 204):
+            return jsonify({'status': 'updated', 'id': existing_id})
+        return jsonify({'status': 'error', 'details': resp.text}), 500
+    else:
+        # Insert new
+        insert_url = f"{SUPABASE_URL}/rest/v1/cookies"
+        resp = requests.post(insert_url, headers=_supabase_headers({'Prefer': 'return=representation'}), json=entry)
+        if resp.status_code in (200, 201):
+            inserted_data = resp.json()
+            return jsonify({'status': 'saved', 'id': inserted_data[0]['id'] if inserted_data else None})
+        return jsonify({'status': 'error', 'details': resp.text}), 500
+
+
+@app.route('/api/storage/list', methods=['GET'])
+def api_storage_list():
+    """List all stored cookies from Supabase."""
+    url = f"{SUPABASE_URL}/rest/v1/cookies?order=savedAt.desc"
+    r = requests.get(url, headers=_supabase_headers())
+    
+    if r.status_code != 200:
+        return jsonify([])
+
+    storage = r.json()
+    safe_list = []
+    for item in storage:
+        safe_item = dict(item)
+        cookie_raw = safe_item.get('cookie', '')
+        if len(cookie_raw) > 40:
+            safe_item['cookie_preview'] = cookie_raw[:20] + '...' + cookie_raw[-15:]
+        else:
+            safe_item['cookie_preview'] = cookie_raw
+        # Don't send full cookie text by default to summary view
+        safe_item.pop('cookie', None) 
+        safe_list.append(safe_item)
+
+    return jsonify(safe_list)
+
+
+@app.route('/api/storage/delete', methods=['DELETE'])
+def api_storage_delete():
+    """Delete a stored cookie by ID."""
+    data = request.get_json()
+    if not data or not data.get('id'):
+        return jsonify({'error': 'ID is required'}), 400
+
+    target_id = data['id']
+    url = f"{SUPABASE_URL}/rest/v1/cookies?id=eq.{target_id}"
+    r = requests.delete(url, headers=_supabase_headers())
+    
+    if r.status_code in (200, 204):
+        return jsonify({'status': 'deleted'})
+    return jsonify({'error': 'Failed to delete'}), 500
+
+
+@app.route('/api/storage/clear', methods=['DELETE'])
+def api_storage_clear():
+    """Delete all stored cookies."""
+    # To delete all rows, Supabase requires to match everything, e.g. ID not null
+    url = f"{SUPABASE_URL}/rest/v1/cookies?id=not.is.null"
+    r = requests.delete(url, headers=_supabase_headers())
+    
+    if r.status_code in (200, 204):
+        return jsonify({'status': 'cleared'})
+    return jsonify({'error': 'Failed to clear'}), 500
+
+
+@app.route('/api/storage/get-cookie', methods=['POST'])
+def api_storage_get_cookie():
+    """Get the full cookie text for a stored entry by ID."""
+    data = request.get_json()
+    if not data or not data.get('id'):
+        return jsonify({'error': 'ID is required'}), 400
+
+    target_id = data['id']
+    url = f"{SUPABASE_URL}/rest/v1/cookies?id=eq.{target_id}&select=cookie"
+    r = requests.get(url, headers=_supabase_headers())
+    
+    if r.status_code == 200:
+        results = r.json()
+        if results:
+            return jsonify({'cookie': results[0].get('cookie', '')})
+
+    return jsonify({'error': 'Not found'}), 404
+
+
+@app.route('/api/storage/export', methods=['GET'])
+def api_storage_export():
+    """Export all stored cookies as a text file."""
+    url = f"{SUPABASE_URL}/rest/v1/cookies?order=savedAt.desc"
+    r = requests.get(url, headers=_supabase_headers())
+    
+    storage = r.json() if r.status_code == 200 else []
+
+    lines = []
+    for item in storage:
+        link = item.get('login_link', '-')
+        lines.append(
+            f"{item.get('email', '-')} | {item.get('plan', '-')} | "
+            f"{item.get('country', '-')} | {link}"
+        )
+
+    content = '\n'.join(lines)
+    return Response(
+        content,
+        mimetype='text/plain',
+        headers={'Content-Disposition': 'attachment; filename=netflix_cookies_export.txt'}
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Public API – Dùng cho website bên ngoài
+# ══════════════════════════════════════════════════════════════════════
+
+def _fetch_cookie_from_storage(cookie_id):
+    """Fetch full cookie text from Supabase by ID. Returns (cookie_text, error_response)."""
+    url = f"{SUPABASE_URL}/rest/v1/cookies?id=eq.{cookie_id}&select=cookie"
+    r = requests.get(url, headers=_supabase_headers())
+    if r.status_code != 200:
+        return None, jsonify({'status': 'ERROR', 'error': 'Không thể kết nối kho lưu trữ'}), 500
+    results = r.json()
+    if not results:
+        return None, jsonify({'status': 'ERROR', 'error': 'Không tìm thấy cookie trong kho'}), 404
+    return results[0].get('cookie', ''), None
+
+
+def _update_storage_entry(cookie_id, update_data):
+    """Update a cookie entry in Supabase with new data (e.g., refreshed login_link)."""
+    url = f"{SUPABASE_URL}/rest/v1/cookies?id=eq.{cookie_id}"
+    requests.patch(url, headers=_supabase_headers(), json=update_data)
+
+
+@app.route('/api/public/get-login-link', methods=['POST'])
+def api_public_get_login_link():
+    """
+    Lấy link đăng nhập từ cookie đã lưu trong kho.
+    
+    Request JSON:
+        { "id": "<uuid của cookie trong kho>" }
+    
+    Response JSON (thành công):
+        {
+            "status": "SUCCESS",
+            "login_link": "https://netflix.com/?nftoken=...",
+            "nftoken": "...",
+            "account": { "email", "plan", "country", "owner" }
+        }
+    
+    Response JSON (thất bại):
+        { "status": "ERROR", "error": "..." }
+    """
+    data = request.get_json()
+    if not data or not data.get('id'):
+        return jsonify({'status': 'ERROR', 'error': 'Thiếu ID cookie'}), 400
+
+    cookie_text, err = _fetch_cookie_from_storage(data['id'])
+    if err:
+        return err
+
+    if not cookie_text:
+        return jsonify({'status': 'ERROR', 'error': 'Cookie trống'}), 400
+
+    # Process cookie to get account info + nftoken
+    result = process_cookie(cookie_text, generate_token=True)
+
+    if result.get('status') != 'LIVE':
+        return jsonify({
+            'status': 'ERROR',
+            'error': result.get('error', 'Cookie hết hạn hoặc không hợp lệ')
+        })
+
+    login_link = result.get('login_link')
+
+    # Update login_link in storage if we got a new one
+    if login_link:
+        _update_storage_entry(data['id'], {
+            'login_link': login_link,
+            'nftoken': result.get('nftoken', ''),
+        })
+
+    return jsonify({
+        'status': 'SUCCESS',
+        'login_link': login_link,
+        'nftoken': result.get('nftoken'),
+        'account': {
+            'email': result.get('email', '-'),
+            'plan': result.get('plan', '-'),
+            'country': result.get('country', '-'),
+            'owner': result.get('owner', '-'),
+            'profiles': result.get('profiles', '-'),
+            'numProfiles': result.get('numProfiles', 0),
+        }
+    })
+
+
+@app.route('/api/public/tv-login', methods=['POST'])
+def api_public_tv_login():
+    """
+    Đăng nhập TV bằng mã code, sử dụng cookie đã lưu trong kho.
+    
+    Request JSON:
+        {
+            "id": "<uuid của cookie trong kho>",
+            "tv_code": "ABCD1234"
+        }
+    
+    Response JSON (thành công):
+        {
+            "status": "SUCCESS",
+            "message": "Đăng nhập TV thành công!",
+            "account": { "email", "plan", "country", "owner" }
+        }
+    
+    Response JSON (thất bại):
+        { "status": "ERROR", "error": "..." }
+    """
+    data = request.get_json()
+    if not data or not data.get('id') or not data.get('tv_code'):
+        return jsonify({'status': 'ERROR', 'error': 'Thiếu ID cookie hoặc mã TV'}), 400
+
+    tv_code = data['tv_code'].strip()
+    if not tv_code:
+        return jsonify({'status': 'ERROR', 'error': 'Mã TV không hợp lệ'}), 400
+
+    cookie_text, err = _fetch_cookie_from_storage(data['id'])
+    if err:
+        return err
+
+    if not cookie_text:
+        return jsonify({'status': 'ERROR', 'error': 'Cookie trống'}), 400
+
+    # Parse cookie
+    netflix_id, secure_id, extras = _parse_cookie_input(cookie_text)
+    if not netflix_id:
+        return jsonify({'status': 'ERROR', 'error': 'Không thể phân tích NetflixId'}), 400
+
+    # Check account to get authURL
+    info, collected_cookies = check_account_info(netflix_id, secure_id, extra_cookies=extras)
+
+    if info.get('status') != 'LIVE':
+        return jsonify({
+            'status': 'ERROR',
+            'error': f'Cookie {info.get("status", "không hợp lệ")}. {info.get("error", "")}'.strip()
+        })
+
+    cookie_dict = {'NetflixId': netflix_id}
+    if secure_id:
+        cookie_dict['SecureNetflixId'] = secure_id
+    cookie_dict.update(extras)
+    cookie_dict.update(collected_cookies)
+
+    auth_url = info.get('authURL')
+
+    # Retry to get authURL if missing
+    if (not auth_url or auth_url == '-') and (
+        'SecureNetflixId' in collected_cookies or 'nfvdid' in collected_cookies
+    ):
+        extra_c = {
+            k: v for k, v in collected_cookies.items()
+            if k in ('SecureNetflixId', 'nfvdid')
+        }
+        info2, collected_cookies2 = check_account_info(
+            netflix_id, collected_cookies.get('SecureNetflixId'), extra_cookies=extra_c
+        )
+        if info2.get('authURL') and info2['authURL'] != '-':
+            auth_url = info2['authURL']
+            cookie_dict.update(collected_cookies2)
+
+    if not auth_url or auth_url == '-':
+        return jsonify({
+            'status': 'ERROR',
+            'error': 'Không tìm thấy authURL. Cookie cần có SecureNetflixId và nfvdid.'
+        })
+
+    ok, msg = tv_login_with_code(auth_url, tv_code, cookie_dict)
+
+    country = info.get('country', '-')
+    if country == '-':
+        country = check_country(netflix_id, secure_id)
+
+    return jsonify({
+        'status': 'SUCCESS' if ok else 'FAILED',
+        'message': msg,
+        'account': {
+            'owner': info.get('owner', '-'),
+            'plan': info.get('plan', '-'),
+            'country': country,
+            'email': info.get('email', '-'),
+        }
+    })
+
+
+@app.route('/api/public/list', methods=['GET'])
+def api_public_list():
+    """
+    Liệt kê tất cả cookie trong kho (không bao gồm cookie text gốc).
+    
+    Response JSON:
+        [
+            {
+                "id": "uuid",
+                "email": "...",
+                "plan": "...",
+                "country": "...",
+                "login_link": "...",
+                "savedAt": "...",
+                ...
+            }
+        ]
+    """
+    url = f"{SUPABASE_URL}/rest/v1/cookies?order=savedAt.desc"
+    r = requests.get(url, headers=_supabase_headers())
+
+    if r.status_code != 200:
+        return jsonify([])
+
+    storage = r.json()
+    safe_list = []
+    for item in storage:
+        safe_item = dict(item)
+        safe_item.pop('cookie', None)  # không trả cookie gốc ra ngoài
+        safe_list.append(safe_item)
+
+    return jsonify(safe_list)
 
 
 # ══════════════════════════════════════════════════════════════════════

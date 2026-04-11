@@ -20,6 +20,7 @@
                 <li class="active" data-tab="single" id="nav-single">Nhập Đơn</li>
                 <li data-tab="bulk" id="nav-bulk">Xử Lý Hàng Loạt</li>
                 <li data-tab="tv" id="nav-tv">Đăng nhập TV</li>
+                <li data-tab="storage" id="nav-storage">Kho Lưu Trữ</li>
             </ul>
         </div>
         <div class="nav-right">
@@ -84,7 +85,10 @@
             <div class="col-right">
                 <div class="right-header">
                     <h3>KẾT QUẢ CHI TIẾT</h3>
-                    <button class="btn-outline-small" id="btn-copy-result" style="display:none;">SAO CHÉP</button>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn-outline-small" id="btn-save-single" style="display:none; background-color: var(--green); color: black; border: none;">LƯU VÀO KHO</button>
+                        <button class="btn-outline-small" id="btn-copy-result" style="display:none;">SAO CHÉP</button>
+                    </div>
                 </div>
                 
                 <!-- Empty State -->
@@ -211,7 +215,10 @@
                             <button class="toggle-btn" id="f-error" style="font-size:11px; padding: 4px 8px;">Lỗi/Hỏng</button>
                         </div>
                     </div>
-                    <button class="btn-outline-small" id="btn-save-bulk">LƯU TỆP</button>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn-outline-small" id="btn-save-to-storage" style="background-color: var(--green); color: black; border: 1px solid var(--green); display:none;">LƯU VÀO KHO</button>
+                        <button class="btn-outline-small" id="btn-save-bulk">LƯU TỆP</button>
+                    </div>
                 </div>
                 
                 <!-- Empty State -->
@@ -305,6 +312,75 @@
                             <span class="badge error-badge">LỖI</span>
                         </div>
                         <p id="tv-error-msg" style="margin-top:10px; color:#aaa;"></p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- =============================== -->
+        <!-- STORAGE TAB                      -->
+        <!-- =============================== -->
+        <section class="panel hidden" id="panel-storage">
+            <div class="col-left">
+                <h2 class="panel-title">Kho Lưu Trữ</h2>
+                <p class="storage-desc">Bạn có thể chọn lưu các cookie hợp lệ từ kết quả kiểm tra vào đây để quản lý lâu dài.</p>
+
+                <div class="stats-row" style="margin-top: 24px;">
+                    <div class="stat-box">
+                        <div class="stat-num" style="color: var(--green);" id="storage-total">0</div>
+                        <div class="stat-lbl">Tổng đã lưu</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-num" id="storage-countries">0</div>
+                        <div class="stat-lbl">Quốc gia</div>
+                    </div>
+                </div>
+
+                <div style="display:flex; gap: 10px; margin-top: 20px;">
+                    <button class="btn-primary-large" id="btn-export-storage" style="flex:1;">
+                        <span>XUẤT FILE</span>
+                    </button>
+                    <button class="btn-primary-large" id="btn-clear-storage" style="flex:1; background: var(--bg-hover); border: 1px solid var(--border);">
+                        <span>XOÁ TẤT CẢ</span>
+                    </button>
+                </div>
+
+
+            </div>
+
+            <div class="col-right">
+                <div class="right-header" style="align-items: center;">
+                    <h3>DANH SÁCH COOKIE</h3>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <button class="btn-outline-small" id="btn-refresh-storage">LÀM MỚI</button>
+                    </div>
+                </div>
+
+                <!-- Empty State -->
+                <div class="empty-state" id="storage-empty">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                        <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+                        <line x1="12" y1="22.08" x2="12" y2="12"/>
+                    </svg>
+                    <p>Kho lưu trữ trống. Kiểm tra và nhấn LƯU VÀO KHO để lưu cookie.</p>
+                </div>
+
+                <!-- Storage List -->
+                <div id="storage-list-container" class="hidden">
+                    <div class="table-container" style="max-height: 650px;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th width="40%">Email / Chủ</th>
+                                    <th width="15%">Ngày lưu</th>
+                                    <th width="15%">Quốc gia</th>
+                                    <th width="15%">Gói</th>
+                                    <th width="15%"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="storage-tbody"></tbody>
+                        </table>
                     </div>
                 </div>
             </div>

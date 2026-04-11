@@ -145,7 +145,21 @@
                 populateSingleLive(data);
                 $('#single-result-container').classList.remove('hidden');
                 $('#btn-copy-result').style.display = 'block';
+                $('#btn-save-single').style.display = 'block';
                 $('#btn-copy-result').onclick = () => copyToClipboard(buildTextCopy(data));
+                
+                window.lastSingleCookieText = val;
+                window.lastSingleData = data;
+                $('#btn-save-single').onclick = async () => {
+                    setLoading('#btn-save-single', true);
+                    const btn = $('#btn-save-single');
+                    const oldText = btn.textContent;
+                    btn.textContent = 'ĐANG LƯU...';
+                    await autoSaveCookie(window.lastSingleCookieText, window.lastSingleData);
+                    toast('Đã lưu cookie hợp lệ vào kho', 'success');
+                    btn.textContent = oldText;
+                    btn.style.display = 'none'; // hide after save
+                };
             } else {
                 $('#single-error-msg').textContent = data.error || 'Cookie đã hết hạn hoặc không hợp lệ.';
                 $('#single-error-container').classList.remove('hidden');
@@ -157,6 +171,32 @@
             setLoading('#btn-check-single', false);
         }
     });
+
+    // Auto-save valid cookie to storage
+    async function autoSaveCookie(cookieText, resultData) {
+        try {
+            await fetch('/api/storage/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cookie: cookieText,
+                    plan: resultData.plan,
+                    country: resultData.country,
+                    email: resultData.email,
+                    owner: resultData.owner,
+                    profiles: resultData.profiles,
+                    numProfiles: resultData.numProfiles,
+                    billing: resultData.billing,
+                    login_link: resultData.login_link || '',
+                    nftoken: resultData.nftoken || '',
+                    videoQuality: resultData.videoQuality,
+                    maxStreams: resultData.maxStreams,
+                })
+            });
+        } catch(e) {
+            // Silent fail - don't interrupt user
+        }
+    }
 
     function populateSingleLive(r) {
         const isFocusToken = mToken.classList.contains('active');
@@ -421,8 +461,44 @@
             setLoading('#btn-run-bulk', false);
             $('#bulk-prog-lbl').textContent = 'Xong';
             toast(`Đã xử lý xong ${d.total} tệp.`, 'success');
+
+            const hasLive = bulkResults.some(item => item.result.status === 'LIVE');
+            if (hasLive) {
+                $('#btn-save-to-storage').style.display = 'block';
+            }
         }
     }
+
+    $('#btn-save-to-storage').addEventListener('click', async () => {
+        const btn = $('#btn-save-to-storage');
+        const oldText = btn.textContent;
+        btn.textContent = 'ĐANG LƯU...';
+        btn.disabled = true;
+
+        let savedCount = 0;
+        const savePromises = bulkResults.filter(item => item.result.status === 'LIVE').map(async (item) => {
+            const r = item.result;
+            const fileObj = bulkFiles[item.index];
+            if (!fileObj) return;
+            try {
+                const text = await fileObj.text();
+                await autoSaveCookie(text, r);
+                savedCount++;
+            } catch(e) {}
+        });
+
+        await Promise.all(savePromises);
+        
+        if (savedCount > 0) {
+            toast(`Đã lưu ${savedCount} cookie hợp lệ vào kho`, 'success');
+        } else {
+            toast('Không có cookie hợp lệ nào được lưu mới', 'info');
+        }
+        
+        btn.textContent = oldText;
+        btn.disabled = false;
+        btn.style.display = 'none';
+    });
 
     // Filter Logic
     const filterBtns = [$('#f-all'), $('#f-live'), $('#f-error')];
@@ -549,5 +625,219 @@
             setLoading('#btn-run-tv', false);
         }
     });
+
+    // ────────────────────────────────────────────────────────────────
+    // Storage Tab
+    // ────────────────────────────────────────────────────────────────
+    let storageData = [];
+
+    async function loadStorage() {
+        try {
+            const res = await fetch('/api/storage/list');
+            storageData = await res.json();
+            renderStorage();
+        } catch(e) {
+            console.error('Failed to load storage:', e);
+        }
+    }
+
+    function renderStorage() {
+        const tbody = $('#storage-tbody');
+        tbody.innerHTML = '';
+
+        if (storageData.length === 0) {
+            $('#storage-empty').classList.remove('hidden');
+            $('#storage-list-container').classList.add('hidden');
+            $('#storage-total').textContent = '0';
+            $('#storage-countries').textContent = '0';
+            return;
+        }
+
+        $('#storage-empty').classList.add('hidden');
+        $('#storage-list-container').classList.remove('hidden');
+        $('#storage-total').textContent = storageData.length;
+
+        // Count unique countries
+        const countries = new Set(storageData.map(d => d.country).filter(c => c && c !== '-'));
+        $('#storage-countries').textContent = countries.size;
+
+        storageData.forEach((item, idx) => {
+            const tr = document.createElement('tr');
+            tr.className = 'bulk-row storage-row'; // reuse bulk-row styling
+            tr.style.animationDelay = (idx * 0.03) + 's';
+            tr.style.cursor = 'pointer';
+
+            const displayName = item.email && item.email !== '-' 
+                ? esc(item.email) 
+                : (item.owner && item.owner !== '-' ? esc(item.owner) : esc(item.cookie_preview || '—'));
+
+            const savedDate = item.savedAt 
+                ? new Date(item.savedAt).toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
+                : '-';
+
+            const qual = item.videoQuality && item.videoQuality !== '-' ? ` (${esc(item.videoQuality)})` : '';
+            const profs = item.numProfiles + (item.profiles && item.profiles !== '-' ? ` — ${esc(item.profiles)}` : '');
+
+            // Main row
+            tr.innerHTML = `
+                <td>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <svg class="expand-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.2s;"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        <div style="font-weight:600; color: var(--text);">${displayName}</div>
+                    </div>
+                </td>
+                <td style="font-size:11px; color:var(--text-3);">${savedDate}</td>
+                <td>${esc(item.country || '-')}</td>
+                <td><span style="font-weight:600;">${esc(item.plan || '-')}</span></td>
+                <td>
+                    <div class="storage-actions-cell" style="justify-content: flex-end;">
+                        <button class="storage-action-btn btn-copy-cookie" data-id="${item.id}" title="Sao chép cookie gốc">Cookie</button>
+                        ${item.login_link ? `<button class="storage-action-btn btn-copy-link" data-link="${item.login_link}" title="Sao chép link đăng nhập">Link</button>` : ''}
+                        <button class="storage-action-btn btn-delete" data-id="${item.id}" title="Xoá">Xóa</button>
+                    </div>
+                </td>
+            `;
+
+            // Detail row
+            const detailTr = document.createElement('tr');
+            detailTr.className = 'bulk-detail-row';
+            detailTr.style.display = 'none';
+
+            detailTr.innerHTML = `
+                <td colspan="5" style="padding:0; border:none; background-color: var(--bg-dark);">
+                    <div class="bulk-detail-content" style="max-height:0; overflow:hidden; transition:max-height 0.4s ease; border-bottom: 1px solid var(--border);">
+                        <div style="padding: 24px 32px; display: flex; flex-direction: column; gap: 20px; max-width: 500px; margin: 0 auto;">
+                            
+                            <div class="info-block" style="margin-bottom:0;">
+                                <div class="block-header">
+                                    <h4>TỔNG QUAN TÀI KHOẢN</h4>
+                                </div>
+                                <div class="info-grid">
+                                    <span class="label">Gói cước:</span> <span class="value">${esc(item.plan) + qual}</span>
+                                    <span class="label">Quốc gia:</span> <span class="value">${esc(item.country)}</span>
+                                    <span class="label">Email:</span> <span class="value">${esc(item.email || '-')}</span>
+                                    <span class="label">Gia hạn:</span> <span class="value">${esc(item.billing || '-')}</span>
+                                    <span class="label">Hồ sơ:</span> <span class="value">${profs}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="info-block" style="margin-bottom:0;">
+                                <div class="block-header">
+                                    <h4>THÔNG TIN TOKEN</h4>
+                                </div>
+                                <div class="info-grid token-grid">
+                                    <span class="label span-all">Link Đăng nhập:</span>
+                                    <div class="token-box span-all">${item.login_link || '<span class="error-text">Không có link</span>'}</div>
+                                    <span class="label span-all" style="margin-top:10px;">Mã Token:</span>
+                                    <div class="token-box span-all" style="max-height:80px">${item.nftoken || '-'}</div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </td>
+            `;
+
+            // Expand/collapse logic
+            tr.addEventListener('click', (e) => {
+                if(e.target.closest('button')) return; // ignore clicks on action buttons
+                const isOpen = detailTr.style.display !== 'none';
+                const content = detailTr.querySelector('.bulk-detail-content');
+                const icon = tr.querySelector('.expand-icon');
+                
+                if (isOpen) {
+                    content.style.maxHeight = '0px';
+                    icon.style.transform = 'rotate(0deg)';
+                    setTimeout(() => { if (content.style.maxHeight === '0px') detailTr.style.display = 'none'; }, 400);
+                } else {
+                    detailTr.style.display = 'table-row';
+                    icon.style.transform = 'rotate(180deg)';
+                    detailTr.offsetHeight; // force reflow
+                    content.style.maxHeight = '1200px';
+                }
+            });
+
+            // Action triggers
+            tr.querySelector('.btn-copy-cookie').addEventListener('click', async (e) => {
+                e.stopPropagation();
+                try {
+                    const res = await fetch('/api/storage/get-cookie', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: item.id })
+                    });
+                    const data = await res.json();
+                    if (data.cookie) {
+                        copyToClipboard(data.cookie);
+                    } else {
+                        toast('Không tìm thấy cookie', 'error');
+                    }
+                } catch(e) {
+                    toast('Lỗi lấy cookie', 'error');
+                }
+            });
+
+            const linkBtn = tr.querySelector('.btn-copy-link');
+            if (linkBtn) {
+                linkBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    copyToClipboard(linkBtn.dataset.link);
+                });
+            }
+
+            tr.querySelector('.btn-delete').addEventListener('click', async (e) => {
+                e.stopPropagation();
+                if (!confirm('Xoá cookie này khỏi kho lưu trữ?')) return;
+                try {
+                    await fetch('/api/storage/delete', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: item.id })
+                    });
+                    toast('Đã xoá', 'success');
+                    loadStorage();
+                } catch(e) {
+                    toast('Lỗi xoá cookie', 'error');
+                }
+            });
+
+            tbody.appendChild(tr);
+            tbody.appendChild(detailTr);
+        });
+    }
+
+    // Refresh button
+    $('#btn-refresh-storage').addEventListener('click', () => {
+        loadStorage();
+        toast('Đã làm mới danh sách', 'info');
+    });
+
+    // Clear all
+    $('#btn-clear-storage').addEventListener('click', async () => {
+        if (!storageData.length) { toast('Kho lưu trữ trống', 'info'); return; }
+        if (!confirm(`Xoá tất cả ${storageData.length} cookie đã lưu? Thao tác không thể hoàn tác.`)) return;
+        try {
+            await fetch('/api/storage/clear', { method: 'DELETE' });
+            toast('Đã xoá tất cả', 'success');
+            loadStorage();
+        } catch(e) {
+            toast('Lỗi xoá', 'error');
+        }
+    });
+
+    // Export
+    $('#btn-export-storage').addEventListener('click', () => {
+        if (!storageData.length) { toast('Kho lưu trữ trống', 'info'); return; }
+        window.location.href = '/api/storage/export';
+        toast('Đang xuất file...', 'info');
+    });
+
+    // Load storage when switching to storage tab
+    const storageTabBtn = $('#nav-storage');
+    if (storageTabBtn) {
+        storageTabBtn.addEventListener('click', () => {
+            loadStorage();
+        });
+    }
 
 })();

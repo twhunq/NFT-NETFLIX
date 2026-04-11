@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Netflix Cookie API – Tài liệu</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            --bg-card: #111111;
+            --bg-code: #0d1117;
+            --border: #1e1e1e;
+            --border-light: #2a2a2a;
+            --text: #e5e5e5;
+            --text-2: #a0a0a0;
+            --text-3: #666;
+            --red: #e50914;
+            --green: #1db954;
+            --blue: #58a6ff;
+            --orange: #f0883e;
+            --purple: #bc8cff;
+            --yellow: #e3b341;
+            --font: 'Inter', -apple-system, sans-serif;
+            --mono: 'JetBrains Mono', 'Fira Code', monospace;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Header */
+        .doc-header {
+            border-bottom: 1px solid var(--border);
+            padding: 40px 0;
+            background: linear-gradient(180deg, #111 0%, var(--bg) 100%);
+        }
+        .doc-header .container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .doc-header h1 {
+            font-size: 28px;
+            font-weight: 900;
+            letter-spacing: -0.5px;
+        }
+        .doc-header h1 span { color: var(--red); }
+        .doc-header p {
+            color: var(--text-2);
+            font-size: 14px;
+            margin-top: 6px;
+        }
+        .base-url-badge {
+            background: var(--bg-code);
+            border: 1px solid var(--border-light);
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--green);
+            cursor: pointer;
+            transition: border-color 0.2s;
+            position: relative;
+        }
+        .base-url-badge:hover { border-color: var(--green); }
+        .base-url-badge::after {
+            content: 'Click để copy';
+            position: absolute;
+            bottom: -24px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 10px;
+            color: var(--text-3);
+            font-family: var(--font);
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .base-url-badge:hover::after { opacity: 1; }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        /* Nav */
+        .doc-nav {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(10,10,10,0.85);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            padding: 0;
+        }
+        .doc-nav .container {
+            display: flex;
+            gap: 0;
+            overflow-x: auto;
+        }
+        .doc-nav a {
+            color: var(--text-3);
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 14px 18px;
+            white-space: nowrap;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .doc-nav a:hover { color: var(--text); border-bottom-color: var(--border-light); }
+        .doc-nav a.active { color: var(--red); border-bottom-color: var(--red); }
+
+        /* Content */
+        .doc-content { padding: 48px 0 80px; }
+
+        .endpoint-section {
+            margin-bottom: 64px;
+            scroll-margin-top: 60px;
+        }
+
+        .section-label {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            color: var(--text-3);
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .endpoint-title {
+            font-size: 22px;
+            font-weight: 800;
+            margin-bottom: 8px;
+            letter-spacing: -0.3px;
+        }
+
+        .endpoint-desc {
+            color: var(--text-2);
+            font-size: 14px;
+            margin-bottom: 24px;
+            max-width: 640px;
+        }
+
+        /* Method + Path badges */
+        .method-path {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--bg-code);
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            padding: 14px 20px;
+            margin-bottom: 28px;
+            font-family: var(--mono);
+            font-size: 14px;
+        }
+        .method-badge {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }
+        .method-get { background: rgba(29,185,84,0.15); color: var(--green); }
+        .method-post { background: rgba(88,166,255,0.15); color: var(--blue); }
+        .method-delete { background: rgba(229,9,20,0.15); color: var(--red); }
+
+        .path-text { color: var(--text); }
+
+        /* Param tables */
+        .param-section { margin-bottom: 28px; }
+        .param-section h4 {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-2);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .param-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .param-table th {
+            text-align: left;
+            padding: 10px 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-3);
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .param-table td {
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            color: var(--text-2);
+            vertical-align: top;
+        }
+        .param-name {
+            font-family: var(--mono);
+            font-weight: 600;
+            color: var(--blue);
+            font-size: 12px;
+        }
+        .param-type {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--purple);
+        }
+        .param-required {
+            display: inline-block;
+            background: rgba(229,9,20,0.12);
+            color: var(--red);
+            font-size: 9px;
+            font-weight: 800;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+
+        /* Code blocks */
+        .code-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 0;
+        }
+        .code-tab {
+            padding: 8px 16px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-3);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+            background: none;
+            border-top: none;
+            border-left: none;
+            border-right: none;
+            font-family: var(--font);
+        }
+        .code-tab:hover { color: var(--text); }
+        .code-tab.active { color: var(--text); border-bottom-color: var(--red); }
+
+        .code-block-wrapper {
+            background: var(--bg-code);
+            border: 1px solid var(--border-light);
+            border-radius: 0 0 8px 8px;
+            overflow: hidden;
+            margin-bottom: 28px;
+        }
+        .code-block-wrapper .code-tabs {
+            border-radius: 8px 8px 0 0;
+            background: #0c0f14;
+        }
+
+        pre {
+            padding: 20px;
+            overflow-x: auto;
+            font-family: var(--mono);
+            font-size: 12.5px;
+            line-height: 1.6;
+            color: var(--text-2);
+        }
+        pre .key { color: var(--blue); }
+        pre .str { color: var(--green); }
+        pre .num { color: var(--orange); }
+        pre .comment { color: var(--text-3); font-style: italic; }
+        pre .keyword { color: var(--purple); }
+
+        /* Response section */
+        .response-section { margin-bottom: 20px; }
+        .response-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-dot.success { background: var(--green); }
+        .status-dot.error { background: var(--red); }
+
+        .response-label {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-2);
+        }
+        .status-code {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--text-3);
+        }
+
+        /* Divider */
+        .section-divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 48px 0;
+        }
+
+        /* Flow diagram */
+        .flow-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-light);
+            border-radius: 10px;
+            padding: 32px;
+            margin-bottom: 28px;
+        }
+        .flow-card h3 {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 20px;
+        }
+        .flow-steps {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            flex-wrap: wrap;
+        }
+        .flow-step {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 18px;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .flow-step .step-num {
+            background: var(--red);
+            color: #fff;
+            width: 22px; height: 22px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 800;
+            flex-shrink: 0;
+        }
+        .flow-arrow {
+            color: var(--text-3);
+            font-size: 18px;
+            padding: 0 8px;
+            flex-shrink: 0;
+        }
+
+        /* Notes */
+        .note-box {
+            background: rgba(88,166,255,0.06);
+            border: 1px solid rgba(88,166,255,0.15);
+            border-left: 3px solid var(--blue);
+            border-radius: 6px;
+            padding: 16px 20px;
+            font-size: 13px;
+            color: var(--text-2);
+            margin-bottom: 20px;
+        }
+        .note-box.warn {
+            background: rgba(240,136,62,0.06);
+            border-color: rgba(240,136,62,0.15);
+            border-left-color: var(--orange);
+        }
+        .note-box strong { color: var(--text); }
+
+        /* Copy button for code blocks */
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .copy-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-3);
+            padding: 4px 10px;
+            font-size: 10px;
+            font-weight: 600;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: var(--font);
+            transition: all 0.15s;
+            margin-right: 12px;
+            margin-top: 8px;
+        }
+        .copy-btn:hover { color: var(--text); border-color: var(--border-light); }
+
+        /* Footer */
+        .doc-footer {
+            border-top: 1px solid var(--border);
+            padding: 32px 0;
+            text-align: center;
+            color: var(--text-3);
+            font-size: 12px;
+        }
+
+        @media (max-width: 640px) {
+            .doc-header .container { flex-direction: column; gap: 16px; }
+            .flow-steps { flex-direction: column; align-items: stretch; }
+            .flow-arrow { transform: rotate(90deg); text-align: center; padding: 4px 0; }
+            .method-path { flex-direction: column; align-items: flex-start; gap: 8px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <header class="doc-header">
+        <div class="container">
+            <div>
+                <h1><span>NETFLIX</span> Cookie API</h1>
+                <p>Tài liệu API công khai – Phiên bản 1.0</p>
+            </div>
+            <div class="base-url-badge" onclick="copyBaseUrl(this)" id="base-url">
+                {{ base_url }}
+            </div>
+        </div>
+    </header>
+
+    <!-- Nav -->
+    <nav class="doc-nav">
+        <div class="container">
+            <a href="#overview" class="active">Tổng quan</a>
+            <a href="#ep-list">Danh sách</a>
+            <a href="#ep-login-link">Lấy Link</a>
+            <a href="#ep-tv-login">Đăng nhập TV</a>
+        </div>
+    </nav>
+
+    <!-- Content -->
+    <div class="doc-content">
+        <div class="container">
+
+            <!-- Overview -->
+            <section class="endpoint-section" id="overview">
+                <div class="section-label">Tổng quan</div>
+                <h2 class="endpoint-title">Bắt đầu sử dụng</h2>
+                <p class="endpoint-desc">
+                    API cho phép truy xuất cookie Netflix đã lưu trong kho lưu trữ Supabase, 
+                    lấy link đăng nhập tự động, và đăng nhập trên thiết bị TV thông qua mã code.
+                </p>
+
+                <!-- Flow -->
+                <div class="flow-card">
+                    <h3>📋 Luồng sử dụng</h3>
+                    <div class="flow-steps">
+                        <div class="flow-step">
+                            <span class="step-num">1</span>
+                            <span>GET /api/public/list</span>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-step">
+                            <span class="step-num">2</span>
+                            <span>Chọn cookie (lấy ID)</span>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-step">
+                            <span class="step-num">3</span>
+                            <span>POST get-login-link hoặc tv-login</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="note-box">
+                    <strong>Base URL:</strong> Tất cả endpoint đều bắt đầu với domain server của bạn, ví dụ: 
+                    <code style="color:var(--green);">https://your-app.onrender.com</code>
+                </div>
+
+                <div class="note-box warn">
+                    <strong>Bảo mật:</strong> Cookie text gốc không bao giờ được trả ra ở endpoint <code>/api/public/list</code>. 
+                    Chỉ trả metadata (email, gói, quốc gia...) để đảm bảo an toàn.
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- EP 1: List -->
+            <section class="endpoint-section" id="ep-list">
+                <div class="section-label">Endpoint 1</div>
+                <h2 class="endpoint-title">Danh sách cookie trong kho</h2>
+                <p class="endpoint-desc">
+                    Lấy toàn bộ danh sách cookie đã lưu trữ. Kết quả sắp xếp theo thời gian lưu (mới nhất trước). 
+                    Không bao gồm nội dung cookie gốc.
+                </p>
+
+                <div class="method-path">
+                    <span class="method-badge method-get">GET</span>
+                    <span class="path-text">/api/public/list</span>
+                </div>
+
+                <!-- Response -->
+                <div class="response-section">
+                    <div class="response-header">
+                        <span class="status-dot success"></span>
+                        <span class="response-label">Response thành công</span>
+                        <span class="status-code">200 OK</span>
+                    </div>
+                </div>
+
+                <div class="code-block-wrapper">
+                    <div class="code-header">
+                        <div class="code-tabs">
+                            <button class="code-tab active">Response JSON</button>
+                        </div>
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+                    </div>
+<pre><code>[
+  {
+    <span class="key">"id"</span>: <span class="str">"3aa4efa7-f20b-4973-8f3a-b9ffb60c308e"</span>,
+    <span class="key">"savedAt"</span>: <span class="str">"2026-04-11T07:53:03.797Z"</span>,
+    <span class="key">"email"</span>: <span class="str">"user@gmail.com"</span>,
+    <span class="key">"owner"</span>: <span class="str">"Nguyễn Văn A"</span>,
+    <span class="key">"plan"</span>: <span class="str">"Premium"</span>,
+    <span class="key">"country"</span>: <span class="str">"US"</span>,
+    <span class="key">"billing"</span>: <span class="str">"15/05/2026"</span>,
+    <span class="key">"profiles"</span>: <span class="str">"User1, User2, Kids"</span>,
+    <span class="key">"numProfiles"</span>: <span class="num">3</span>,
+    <span class="key">"videoQuality"</span>: <span class="str">"Ultra HD"</span>,
+    <span class="key">"maxStreams"</span>: <span class="str">"4"</span>,
+    <span class="key">"login_link"</span>: <span class="str">"https://netflix.com/?nftoken=..."</span>,
+    <span class="key">"nftoken"</span>: <span class="str">"abc123..."</span>
+  }
+]</code></pre>
+                </div>
+
+                <!-- Example curl -->
+                <div class="code-block-wrapper">
+                    <div class="code-header">
+                        <div class="code-tabs">
+                            <button class="code-tab active">cURL</button>
+                            <button class="code-tab" onclick="switchExample(this, 'js')">JavaScript</button>
+                            <button class="code-tab" onclick="switchExample(this, 'py')">Python</button>
+                        </div>
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+                    </div>
+<pre class="example-curl"><code><span class="keyword">curl</span> <span class="str">"https://your-server.com/api/public/list"</span></code></pre>
+<pre class="example-js" style="display:none"><code><span class="keyword">const</span> res = <span class="keyword">await</span> fetch(<span class="str">'/api/public/list'</span>);
+<span class="keyword">const</span> cookies = <span class="keyword">await</span> res.json();
+
+cookies.forEach(item => {
+  console.log(item.id, item.email, item.plan);
+});</code></pre>
+<pre class="example-py" style="display:none"><code><span class="keyword">import</span> requests
+
+res = requests.get(<span class="str">"https://your-server.com/api/public/list"</span>)
+cookies = res.json()
+
+<span class="keyword">for</span> item <span class="keyword">in</span> cookies:
+    print(item[<span class="str">"id"</span>], item[<span class="str">"email"</span>], item[<span class="str">"plan"</span>])</code></pre>
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- EP 2: Get Login Link -->
+            <section class="endpoint-section" id="ep-login-link">
+                <div class="section-label">Endpoint 2</div>
+                <h2 class="endpoint-title">Lấy link đăng nhập</h2>
+                <p class="endpoint-desc">
+                    Tạo link đăng nhập Netflix tự động (nftoken) từ cookie đã lưu trong kho. 
+                    Link mới sẽ được cập nhật lại vào kho lưu trữ tự động.
+                </p>
+
+                <div class="method-path">
+                    <span class="method-badge method-post">POST</span>
+                    <span class="path-text">/api/public/get-login-link</span>
+                </div>
+
+                <!-- Params -->
+                <div class="param-section">
+                    <h4>Request Body (JSON)</h4>
+                    <table class="param-table">
+                        <thead>
+                            <tr><th>Tham số</th><th>Kiểu</th><th>Mô tả</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span class="param-name">id</span> <span class="param-required">BẮT BUỘC</span></td>
+                                <td><span class="param-type">string (uuid)</span></td>
+                                <td>ID của cookie trong kho lưu trữ (lấy từ <code>/api/public/list</code>)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Success Response -->
+                <div class="response-section">
+                    <div class="response-header">
+                        <span class="status-dot success"></span>
+                        <span class="response-label">Response thành công</span>
+                        <span class="status-code">200 OK</span>
+                    </div>
+                </div>
+
+                <div class="code-block-wrapper">
+                    <div class="code-header">
+                        <div class="code-tabs"><button class="code-tab active">Response JSON</button></div>
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+                    </div>
+<pre><code>{
+  <span class="key">"status"</span>: <span class="str">"SUCCESS"</span>,
+  <span class="key">"login_link"</span>: <span class="str">"https://netflix.com/?nftoken=abc123..."</span>,
+  <span class="key">"nftoken"</span>: <span class="str">"abc123..."</span>,
+  <span class="key">"account"</span>: {
+    <span class="key">"email"</span>: <span class="str">"user@gmail.com"</span>,
+    <span class="key">"plan"</span>: <span class="str">"Premium"</span>,
+    <span class="key">"country"</span>: <span class="str">"US"</span>,
+    <span class="key">"owner"</span>: <span class="str">"Nguyễn Văn A"</span>,
+    <span class="key">"profiles"</span>: <span class="str">"User1, User2"</span>,
+    <span class="key">"numProfiles"</span>: <span class="num">2</span>
+  }
+}</code></pre>
+                </div>
+
+                <!-- Error Response -->
+                <div class="response-section">
+                    <div class="response-header">
+                        <span class="status-dot error"></span>
+                        <span class="response-label">Response thất bại</span>
+                        <span class="status-code">400 / 404</span>
+                    </div>
+                </div>
+
+                <div class="code-block-wrapper">
+                    <div class="code-header">
+                        <div class="code-tabs"><button class="code-tab active">Error JSON</button></div>
+                    </div>
+<pre><code>{
+  <span class="key">"status"</span>: <span class="str">"ERROR"</span>,
+  <span class="key">"error"</span>: <span class="str">"Cookie hết hạn hoặc không hợp lệ"</span>
+}</code></pre>
+                </div>
+
+                <!-- Example -->
+                <div class="code-block-wrapper">
+                    <div class="code-header">
+                        <div class="code-tabs">
+                            <button class="code-tab active">cURL</button>
+                            <button class="code-tab" onclick="switchExample(this, 'js')">JavaScript</button>
+                            <button class="code-tab" onclick="switchExample(this, 'py')">Python</button>
+                        </div>
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+                    </div>
+<pre class="example-curl"><code><span class="keyword">curl</span> -X POST <span class="str">"https://your-server.com/api/public/get-login-link"</span> \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{"id": "3aa4efa7-f20b-4973-8f3a-b9ffb60c308e"}'</span></code></pre>
+<pre class="example-js" style="display:none"><code><span class="keyword">const</span> res = <span class="keyword">await</span> fetch(<span class="str">'/api/public/get-login-link'</span>, {
+  method: <span class="str">'POST'</span>,
+  headers: { <span class="str">'Content-Type'</span>: <span class="str">'application/json'</span> },
+  body: JSON.stringify({ id: <span class="str">'3aa4efa7-f20b-...'</span> })
+});
+<span class="keyword">const</span> data = <span class="keyword">await</span> res.json();
+
+<span class="keyword">if</span> (data.status === <span class="str">'SUCCESS'</span>) {
+  console.log(<span class="str">'Link:'</span>, data.login_link);
+  <span class="comment">// Mở link trong trình duyệt để đăng nhập tự động</span>
+  window.open(data.login_link);
+}</code></pre>
+<pre class="example-py" style="display:none"><code><span class="keyword">import</span> requests
+
+res = requests.post(<span class="str">"https://your-server.com/api/public/get-login-link"</span>, json={
+    <span class="str">"id"</span>: <span class="str">"3aa4efa7-f20b-4973-8f3a-b9ffb60c308e"</span>
+})
+data = res.json()
+
+<span class="keyword">if</span> data[<span class="str">"status"</span>] == <span class="str">"SUCCESS"</span>:
+    print(<span class="str">"Link đăng nhập:"</span>, data[<span class="str">"login_link"</span>])</code></pre>
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- EP 3: TV Login -->
+            <section class="endpoint-section" id="ep-tv-login">
+                <div class="section-label">Endpoint 3</div>
+                <h2 class="endpoint-title">Đăng nhập TV</h2>
+                <p class="endpoint-desc">
+                    Đăng nhập Netflix trên Smart TV / thiết bị streaming bằng mã code hiển thị trên TV, 
+                    sử dụng cookie đã lưu trong kho.
+                </p>
+
+                <div class="method-path">
+                    <span class="method-badge method-post">POST</span>
+                    <span class="path-text">/api/public/tv-login</span>
+                </div>
+
+                <!-- Params -->
+                <div class="param-section">
+                    <h4>Request Body (JSON)</h4>
+                    <table class="param-table">
+                        <thead>
+                            <tr><th>Tham số</th><th>Kiểu</th><th>Mô tả</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span class="param-name">id</span> <span class="param-required">BẮT BUỘC</span></td>
+                                <td><span class="param-type">string (uuid)</span></td>
+                                <td>ID của cookie trong kho lưu trữ</td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">tv_code</span> <span class="param-required">BẮT BUỘC</span></td>
+                                <td><span class="param-type">string</span></td>
+                                <td>Mã code 8 ký tự hiển thị trên màn hình TV (ví dụ: <code>ABCD1234</code>)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Success -->
+                <div class="response-section">
+                    <div class="response-header">
+                        <span class="status-dot success"></span>
+                        <span class="response-label">Response thành công</span>
+                        <span class="status-code">200 OK</span>
+                    </div>
+                </div>
+
+                <div class="code-block-wrapper">
+                    <div class="code-header">
+                        <div class="code-tabs"><button class="code-tab active">Response JSON</button></div>
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+                    </div>
+<pre><code>{
+  <span class="key">"status"</span>: <span class="str">"SUCCESS"</span>,
+  <span class="key">"message"</span>: <span class="str">"Đăng nhập TV thành công!"</span>,
+  <span class="key">"account"</span>: {
+    <span class="key">"email"</span>: <span class="str">"user@gmail.com"</span>,
+    <span class="key">"plan"</span>: <span class="str">"Premium"</span>,
+    <span class="key">"country"</span>: <span class="str">"US"</span>,
+    <span class="key">"owner"</span>: <span class="str">"Nguyễn Văn A"</span>
+  }
+}</code></pre>
+                </div>
+
+                <!-- Error -->
+                <div class="response-section">
+                    <div class="response-header">
+                        <span class="status-dot error"></span>
+                        <span class="response-label">Response thất bại</span>
+                    </div>
+                </div>
+
+                <div class="code-block-wrapper">
+                    <div class="code-header">
+                        <div class="code-tabs"><button class="code-tab active">Error JSON</button></div>
+                    </div>
+<pre><code><span class="comment">// Trường hợp cookie hết hạn</span>
+{ <span class="key">"status"</span>: <span class="str">"ERROR"</span>, <span class="key">"error"</span>: <span class="str">"Cookie DEAD."</span> }
+
+<span class="comment">// Trường hợp thiếu authURL</span>
+{ <span class="key">"status"</span>: <span class="str">"ERROR"</span>, <span class="key">"error"</span>: <span class="str">"Không tìm thấy authURL..."</span> }
+
+<span class="comment">// Trường hợp mã TV sai hoặc hết hạn</span>
+{ <span class="key">"status"</span>: <span class="str">"FAILED"</span>, <span class="key">"message"</span>: <span class="str">"Mã code không hợp lệ"</span> }</code></pre>
+                </div>
+
+                <!-- Example -->
+                <div class="code-block-wrapper">
+                    <div class="code-header">
+                        <div class="code-tabs">
+                            <button class="code-tab active">cURL</button>
+                            <button class="code-tab" onclick="switchExample(this, 'js')">JavaScript</button>
+                            <button class="code-tab" onclick="switchExample(this, 'py')">Python</button>
+                        </div>
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+                    </div>
+<pre class="example-curl"><code><span class="keyword">curl</span> -X POST <span class="str">"https://your-server.com/api/public/tv-login"</span> \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{"id": "3aa4efa7-...", "tv_code": "ABCD1234"}'</span></code></pre>
+<pre class="example-js" style="display:none"><code><span class="keyword">const</span> res = <span class="keyword">await</span> fetch(<span class="str">'/api/public/tv-login'</span>, {
+  method: <span class="str">'POST'</span>,
+  headers: { <span class="str">'Content-Type'</span>: <span class="str">'application/json'</span> },
+  body: JSON.stringify({
+    id: <span class="str">'3aa4efa7-f20b-...'</span>,
+    tv_code: <span class="str">'ABCD1234'</span>
+  })
+});
+<span class="keyword">const</span> data = <span class="keyword">await</span> res.json();
+
+<span class="keyword">if</span> (data.status === <span class="str">'SUCCESS'</span>) {
+  alert(<span class="str">'Đăng nhập TV thành công! '</span> + data.message);
+} <span class="keyword">else</span> {
+  alert(<span class="str">'Lỗi: '</span> + (data.error || data.message));
+}</code></pre>
+<pre class="example-py" style="display:none"><code><span class="keyword">import</span> requests
+
+res = requests.post(<span class="str">"https://your-server.com/api/public/tv-login"</span>, json={
+    <span class="str">"id"</span>: <span class="str">"3aa4efa7-f20b-4973-8f3a-b9ffb60c308e"</span>,
+    <span class="str">"tv_code"</span>: <span class="str">"ABCD1234"</span>
+})
+data = res.json()
+
+<span class="keyword">if</span> data[<span class="str">"status"</span>] == <span class="str">"SUCCESS"</span>:
+    print(<span class="str">"✅"</span>, data[<span class="str">"message"</span>])
+<span class="keyword">else</span>:
+    print(<span class="str">"❌"</span>, data.get(<span class="str">"error"</span>, data.get(<span class="str">"message"</span>)))</code></pre>
+                </div>
+            </section>
+
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="doc-footer">
+        <div class="container">
+            Netflix Cookie API Documentation &bull; Powered by Flask + Supabase
+        </div>
+    </footer>
+
+    <script>
+        function copyBaseUrl(el) {
+            navigator.clipboard.writeText(el.textContent.trim());
+            const orig = el.textContent;
+            el.textContent = '✓ Đã copy!';
+            setTimeout(() => el.textContent = orig, 1500);
+        }
+
+        function copyCode(btn) {
+            const wrapper = btn.closest('.code-block-wrapper') || btn.closest('.code-header').parentElement;
+            const visiblePre = Array.from(wrapper.querySelectorAll('pre')).find(p => p.style.display !== 'none');
+            if (visiblePre) {
+                navigator.clipboard.writeText(visiblePre.textContent);
+                const orig = btn.textContent;
+                btn.textContent = '✓ Copied';
+                setTimeout(() => btn.textContent = orig, 1500);
+            }
+        }
+
+        function switchExample(tabBtn, lang) {
+            const wrapper = tabBtn.closest('.code-block-wrapper');
+            // Toggle tabs
+            wrapper.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+            tabBtn.classList.add('active');
+            // Toggle pres
+            wrapper.querySelectorAll('pre').forEach(p => p.style.display = 'none');
+            const target = wrapper.querySelector('.example-' + lang);
+            if (target) target.style.display = 'block';
+        }
+
+        // Active nav on scroll
+        const sections = document.querySelectorAll('.endpoint-section');
+        const navLinks = document.querySelectorAll('.doc-nav a');
+        window.addEventListener('scroll', () => {
+            let current = '';
+            sections.forEach(s => {
+                if (window.scrollY >= s.offsetTop - 80) current = s.id;
+            });
+            navLinks.forEach(a => {
+                a.classList.remove('active');
+                if (a.getAttribute('href') === '#' + current) a.classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>
