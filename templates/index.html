@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Netflix Cookies Checker</title>
+    <meta name="description" content="Kiểm tra Netflix Cookies, lấy Token, đăng nhập TV">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect rx='20' width='100' height='100' fill='%23E50914'/><text x='50' y='72' font-size='64' font-weight='900' fill='white' text-anchor='middle' font-family='sans-serif'>N</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4">
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar">
+        <div class="nav-left">
+            <div class="logo">NETFLIX</div>
+            <ul class="nav-links">
+                <li class="active" data-tab="single" id="nav-single">Nhập Đơn</li>
+                <li data-tab="bulk" id="nav-bulk">Xử Lý Hàng Loạt</li>
+                <li data-tab="tv" id="nav-tv">Đăng nhập TV</li>
+            </ul>
+        </div>
+        <div class="nav-right">
+            <svg class="bell-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+            </svg>
+            <div class="avatar">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/0/0b/Netflix-avatar.png" alt="Avatar">
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content Grid -->
+    <main class="main-content">
+        
+        <!-- =============================== -->
+        <!-- SINGLE TAB                        -->
+        <!-- =============================== -->
+        <section class="panel active" id="panel-single">
+            <div class="col-left">
+                <h2 class="panel-title">Kiểm tra Cookies</h2>
+                <div class="input-container">
+                    <textarea id="single-cookie" class="input-dark textarea-large" 
+                        placeholder="Dán cookie Netflix (định dạng Key=Value, Netscape File, hoặc cách nhau bởi '|')"></textarea>
+                </div>
+                
+                <div class="action-row">
+                    <button class="btn-icon btn-dark" id="btn-upload-single" title="Tải tệp lên">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                    </button>
+                    <button class="btn-icon btn-dark" id="btn-paste-single" title="Dán từ Clipboard">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    </button>
+                    <button class="btn-icon btn-dark-red" id="btn-clear-single" title="Xóa nội dung">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    </button>
+                    <input type="file" id="single-file-input" accept=".txt" hidden>
+                </div>
+
+                <div class="toggle-row">
+                    <button class="toggle-btn active" id="mode-full">Thông tin đầy đủ</button>
+                    <button class="toggle-btn" id="mode-token">Chỉ Token</button>
+                </div>
+
+                <div style="margin-top:20px; margin-bottom:20px;">
+                    <button class="btn-primary-large" id="btn-check-single">
+                        <span>KIỂM TRA NGAY</span>
+                        <div class="btn-spinner hidden"></div>
+                    </button>
+                </div>
+                
+                <div class="progress-bar">
+                    <div class="prog-text">
+                        <span id="single-prog-lbl">Sẵn sàng</span>
+                        <span id="single-prog-pct">0%</span>
+                    </div>
+                    <div class="prog-track"><div class="prog-fill" id="single-prog-fill"></div></div>
+                </div>
+            </div>
+
+            <div class="col-right">
+                <div class="right-header">
+                    <h3>KẾT QUẢ CHI TIẾT</h3>
+                    <button class="btn-outline-small" id="btn-copy-result" style="display:none;">SAO CHÉP</button>
+                </div>
+                
+                <!-- Empty State -->
+                <div class="empty-state" id="single-empty">
+                    <svg viewBox="0 0 45 45" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+                        <path d="M22.5 3.75C12.145 3.75 3.75 12.145 3.75 22.5C3.75 32.855 12.145 41.25 22.5 41.25C32.855 41.25 41.25 32.855 41.25 22.5C41.25 18.064 39.52 13.914 36.6 10.74C34.774 13.313 31.956 15 28.75 15C24.453 15 20.916 11.97 20.187 7.892C15.65 8.922 12.5 13.31 12.5 18.75C12.5 24.272 16.977 28.75 22.5 28.75C26.177 28.75 29.414 26.8 31.25 23.86C32.32 29.356 37.15 33.568 43 33.74C40.64 38.318 35.836 41.25 30.334 41.25"></path>
+                        <circle cx="16.25" cy="22.5" r="1.875" fill="currentColor" stroke="none"></circle>
+                        <circle cx="23.75" cy="31.25" r="2.5" fill="currentColor" stroke="none"></circle>
+                        <circle cx="28.75" cy="18.75" r="1.25" fill="currentColor" stroke="none"></circle>
+                    </svg>
+                    <p>Kết quả sẽ hiển thị tại đây...</p>
+                </div>
+
+                <!-- Result Container -->
+                <div id="single-result-container" class="hidden">
+                    <div class="info-block">
+                        <div class="block-header">
+                            <h4>TỔNG QUAN TÀI KHOẢN</h4>
+                            <span class="badge" id="single-badge-status">HỢP LỆ</span>
+                        </div>
+                        <div class="info-grid" id="single-info-grid">
+                            <span class="label">Gói cước:</span> <span class="value" id="r-plan">-</span>
+                            <span class="label">Quốc gia:</span> <span class="value" id="r-country">-</span>
+                            <span class="label">Video:</span> <span class="value" id="r-video">-</span>
+                            <span class="label">Email:</span> <span class="value" id="r-email">-</span>
+                            <span class="label">Gia hạn:</span> <span class="value" id="r-billing">-</span>
+                            <span class="label">Thanh toán:</span> <span class="value" id="r-payment">-</span>
+                            <span class="label">Hồ sơ:</span> <span class="value" id="r-profiles">-</span>
+                        </div>
+                    </div>
+                    
+                    <div class="info-block">
+                        <div class="block-header">
+                            <h4>THÔNG TIN TOKEN</h4>
+                        </div>
+                        <div class="info-grid token-grid">
+                            <span class="label label-inline">Hết hạn:</span>
+                            <span class="value value-right" id="r-expire">-</span>
+                            
+                            <span class="label span-all">Link Đăng nhập:</span>
+                            <div class="token-box span-all" id="r-link">-</div>
+                            <div class="span-all"><button class="btn-dark-small" id="btn-copy-link">Sao chép Link</button></div>
+                            
+                            <span class="label span-all" style="margin-top:10px;">Mã Token:</span>
+                            <div class="token-box span-all" id="r-token" style="max-height:80px">-</div>
+                            <div class="span-all"><button class="btn-dark-small" id="btn-copy-token">Sao chép Mã</button></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Error Container -->
+                <div id="single-error-container" class="hidden">
+                     <div class="info-block error-block">
+                         <div class="block-header">
+                             <h4 class="error-text">LỖI KIỂM TRA</h4>
+                             <span class="badge error-badge">LỖI</span>
+                         </div>
+                         <p id="single-error-msg" style="margin-top:10px; color:#aaa;"></p>
+                     </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- =============================== -->
+        <!-- BULK TAB                          -->
+        <!-- =============================== -->
+        <section class="panel hidden" id="panel-bulk">
+            <div class="col-left">
+                <h2 class="panel-title">Xử Lý Hàng Loạt</h2>
+                
+                <div class="upload-zone-dashed" id="bulk-upload-zone">
+                    <input type="file" id="bulk-file-input" accept=".txt" multiple hidden>
+                    <svg class="cloud-svg" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M18.42 8.22A7 7 0 0 0 5.06 10.11A4 4 0 0 0 6 18h11a5 5 0 0 0 1.42-9.78Z"/>
+                        <path d="m12 11 2.5 2.5h-1.5v3h-2v-3H9.5L12 11Z" fill="#111"/> 
+                    </svg>
+                    <p>Kéo thả tệp Cookies vào đây hoặc nhấn để chọn</p>
+                </div>
+
+                <div class="file-selection-area">
+                    <div class="f-lbl" id="bulk-file-count">Tệp đã chọn (0)</div>
+                    <div class="select-wrapper">
+                        <select class="input-dark select-dark" id="bulk-file-select">
+                            <option>Chưa chọn tệp nào</option>
+                        </select>
+                        <button class="btn-clear-select" id="btn-clear-bulk" title="Xóa tất cả">&times;</button>
+                    </div>
+                </div>
+
+                <div class="stats-row">
+                    <div class="stat-box">
+                        <div class="stat-num" id="s-live">0</div>
+                        <div class="stat-lbl">Hợp lệ</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-num error-text" id="s-dead">0</div>
+                        <div class="stat-lbl">Lỗi</div>
+                    </div>
+                </div>
+
+                <div style="margin-top:20px; margin-bottom:20px;">
+                    <button class="btn-primary-large" id="btn-run-bulk" disabled>
+                        <span>BẮT ĐẦU XỬ LÝ</span>
+                        <div class="btn-spinner hidden"></div>
+                    </button>
+                </div>
+                
+                <div class="progress-bar">
+                    <div class="prog-text">
+                        <span id="bulk-prog-lbl">Sẵn sàng</span>
+                        <span id="bulk-prog-pct">0%</span>
+                    </div>
+                    <div class="prog-track"><div class="prog-fill" id="bulk-prog-fill"></div></div>
+                </div>
+            </div>
+
+            <div class="col-right">
+                <div class="right-header" style="align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <h3 style="margin: 0;">KẾT QUẢ HÀNG LOẠT</h3>
+                        <div class="toggle-row" style="margin-top:0; padding: 2px;">
+                            <button class="toggle-btn active" id="f-all" style="font-size:11px; padding: 4px 8px;">Tất cả</button>
+                            <button class="toggle-btn" id="f-live" style="font-size:11px; padding: 4px 8px;">Hợp lệ</button>
+                            <button class="toggle-btn" id="f-error" style="font-size:11px; padding: 4px 8px;">Lỗi/Hỏng</button>
+                        </div>
+                    </div>
+                    <button class="btn-outline-small" id="btn-save-bulk">LƯU TỆP</button>
+                </div>
+                
+                <!-- Empty State -->
+                <div class="empty-state" id="bulk-empty">
+                    <svg class="stack-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                        <polyline points="2 12 12 17 22 12"></polyline>
+                        <polyline points="2 17 12 22 22 17"></polyline>
+                    </svg>
+                    <p>Đang chờ tệp tin...</p>
+                </div>
+
+                <!-- Result List -->
+                <div id="bulk-result-container" class="hidden">
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th width="40%">Tệp</th>
+                                    <th width="15%">Trạng thái</th>
+                                    <th width="15%">Quốc gia</th>
+                                    <th width="15%">Gói</th>
+                                    <th width="15%"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="bulk-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- =============================== -->
+        <!-- TV TAB                            -->
+        <!-- =============================== -->
+        <section class="panel hidden" id="panel-tv">
+             <div class="col-left">
+                <h2 class="panel-title">Đăng nhập TV</h2>
+                <div class="input-container" style="margin-bottom:15px;">
+                    <label class="input-lbl">Cookie</label>
+                    <textarea id="tv-cookie" class="input-dark textarea-small" placeholder="Dán cookie..."></textarea>
+                </div>
+                <div class="input-container" style="margin-bottom:25px;">
+                    <label class="input-lbl">Mã hiển thị trên TV</label>
+                    <input type="text" id="tv-code" class="input-dark input-code" placeholder="ABCD1234" maxlength="8">
+                </div>
+
+                <div style="margin-bottom:20px;">
+                    <button class="btn-primary-large" id="btn-run-tv">
+                        <span>KẾT NỐI NGAY</span>
+                        <div class="btn-spinner hidden"></div>
+                    </button>
+                </div>
+                
+                <div class="progress-bar">
+                    <div class="prog-text">
+                        <span id="tv-prog-lbl">Sẵn sàng</span>
+                        <span id="tv-prog-pct"></span>
+                    </div>
+                    <div class="prog-track"><div class="prog-fill" id="tv-prog-fill"></div></div>
+                </div>
+            </div>
+
+            <div class="col-right">
+                <div class="right-header">
+                    <h3>KẾT QUẢ TV</h3>
+                </div>
+                
+                <div class="empty-state" id="tv-empty">
+                    <svg viewBox="0 0 24 24" width="45" height="45" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect>
+                        <polyline points="17 2 12 7 7 2"></polyline>
+                    </svg>
+                    <p>Kết quả đăng nhập hiển thị tại đây...</p>
+                </div>
+
+                <div id="tv-result-container" class="hidden">
+                    <div class="info-block" id="tv-success-block">
+                        <div class="block-header">
+                            <h4>KẾT NỐI THÀNH CÔNG</h4>
+                            <span class="badge">ĐÃ DUYỆT</span>
+                        </div>
+                        <p id="tv-success-msg" style="margin-top:10px; color:#1db954;"></p>
+                    </div>
+                </div>
+                
+                <div id="tv-error-container" class="hidden">
+                    <div class="info-block error-block">
+                        <div class="block-header">
+                            <h4 class="error-text">KẾT NỐI THẤT BẠI</h4>
+                            <span class="badge error-badge">LỖI</span>
+                        </div>
+                        <p id="tv-error-msg" style="margin-top:10px; color:#aaa;"></p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <div id="toast-container"></div>
+    <script src="{{ url_for('static', filename='app.js') }}?v=5"></script>
+</body>
+</html>
