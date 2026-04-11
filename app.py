@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, Response
+from flask import Flask, request, jsonify, render_template, Response, send_file
 from flask_cors import CORS
 import json
 import queue
@@ -490,25 +490,43 @@ def api_storage_get_cookie():
 
 @app.route('/api/storage/export', methods=['GET'])
 def api_storage_export():
-    """Export all stored cookies as a text file."""
+    """Export all stored cookies as a ZIP file containing individual .txt files."""
     url = f"{SUPABASE_URL}/rest/v1/cookies?order=savedAt.desc"
     r = requests.get(url, headers=_supabase_headers())
     
     storage = r.json() if r.status_code == 200 else []
 
-    lines = []
-    for item in storage:
-        link = item.get('login_link', '-')
-        lines.append(
-            f"{item.get('email', '-')} | {item.get('plan', '-')} | "
-            f"{item.get('country', '-')} | {link}"
-        )
+    import zipfile
+    import io
 
-    content = '\n'.join(lines)
-    return Response(
-        content,
-        mimetype='text/plain',
-        headers={'Content-Disposition': 'attachment; filename=netflix_cookies_export.txt'}
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for idx, item in enumerate(storage):
+            email = item.get('email')
+            if not email or email == '-':
+                email = f"unknown_{idx}"
+            else:
+                email = email.replace('/', '-').replace('\\', '-').replace(':', '-')
+                
+            country = item.get('country') or 'XX'
+            if country == '-': country = 'XX'
+            
+            plan = item.get('plan') or 'Unknown'
+            if plan == '-': plan = 'Unknown'
+            
+            # Tên file giống định dạng file cookie: [Premium] [US] user@email.com.txt
+            filename = f"[{plan}] [{country}] {email}.txt"
+            
+            cookie = item.get('cookie', '')
+            zip_file.writestr(filename, cookie)
+
+    zip_buffer.seek(0)
+    
+    return send_file(
+        zip_buffer,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f'netflix_cookies_{int(datetime.now().timestamp())}.zip'
     )
 
 
@@ -534,67 +552,101 @@ def _update_storage_entry(cookie_id, update_data):
     requests.patch(url, headers=_supabase_headers(), json=update_data)
 
 
-@app.route('/api/public/get-login-link', methods=['POST'])
-def api_public_get_login_link():
+@app.route('/api/public/get-link', methods=['GET', 'POST'])
+def api_public_get_link():
     """
-    Lấy link đăng nhập từ cookie đã lưu trong kho.
+    API tự động lấy link đăng nhập Netflix (Xoay vòng luân phiên).
     
-    Request JSON:
-        { "id": "<uuid của cookie trong kho>" }
+    Cách hoạt động:
+      1. Lấy 5 cookie CHƯA BÁN (sold=false), ưu tiên cái lâu chưa dùng nhất.
+      2. Kiểm tra lần lượt, cái nào SỐNG → trả link + tăng usage_count.
+      3. Khi usage_count đạt 5 → đánh dấu sold=true (đã bán hết slot).
+      4. Cái nào CHẾT → xóa khỏi kho luôn.
+      5. Sau mỗi lần trả link, đẩy cookie xuống cuối hàng chờ (xoay vòng).
     
     Response JSON (thành công):
         {
             "status": "SUCCESS",
             "login_link": "https://netflix.com/?nftoken=...",
             "nftoken": "...",
+            "usage": "3/5",
             "account": { "email", "plan", "country", "owner" }
         }
-    
     Response JSON (thất bại):
         { "status": "ERROR", "error": "..." }
     """
-    data = request.get_json()
-    if not data or not data.get('id'):
-        return jsonify({'status': 'ERROR', 'error': 'Thiếu ID cookie'}), 400
+    MAX_USAGE = 5  # Tối đa 5 lần lấy link cho mỗi cookie
 
-    cookie_text, err = _fetch_cookie_from_storage(data['id'])
-    if err:
-        return err
-
-    if not cookie_text:
-        return jsonify({'status': 'ERROR', 'error': 'Cookie trống'}), 400
-
-    # Process cookie to get account info + nftoken
-    result = process_cookie(cookie_text, generate_token=True)
-
-    if result.get('status') != 'LIVE':
+    # Lấy 5 cookie CHƯA BÁN, lâu chưa dùng nhất (xoay vòng)
+    url = (
+        f"{SUPABASE_URL}/rest/v1/cookies"
+        f"?select=id,cookie,usage_count"
+        f"&or=(sold.is.null,sold.eq.false)"
+        f"&order=savedAt.asc"
+        f"&limit=5"
+    )
+    r = requests.get(url, headers=_supabase_headers())
+    
+    if r.status_code != 200:
+        return jsonify({'status': 'ERROR', 'error': 'Lỗi kết nối Database'}), 500
+        
+    cookies_list = r.json()
+    if not cookies_list:
         return jsonify({
-            'status': 'ERROR',
-            'error': result.get('error', 'Cookie hết hạn hoặc không hợp lệ')
-        })
+            'status': 'ERROR', 
+            'error': 'Kho hết cookie khả dụng (tất cả đã bán hoặc trống)'
+        }), 404
 
-    login_link = result.get('login_link')
-
-    # Update login_link in storage if we got a new one
-    if login_link:
-        _update_storage_entry(data['id'], {
-            'login_link': login_link,
-            'nftoken': result.get('nftoken', ''),
-        })
+    for item in cookies_list:
+        cookie_id = item.get('id')
+        cookie_text = item.get('cookie')
+        current_usage = item.get('usage_count') or 0
+        
+        if not cookie_text:
+            continue
+            
+        result = process_cookie(cookie_text, generate_token=True)
+        
+        if result.get('status') == 'LIVE':
+            login_link = result.get('login_link')
+            if login_link:
+                new_usage = current_usage + 1
+                
+                # Cập nhật: tăng usage_count + xoay vòng savedAt
+                update_data = {
+                    'login_link': login_link,
+                    'nftoken': result.get('nftoken', ''),
+                    'usage_count': new_usage,
+                    'savedAt': datetime.now().isoformat(),
+                }
+                
+                # Đủ 5 slot → đánh dấu ĐÃ BÁN
+                if new_usage >= MAX_USAGE:
+                    update_data['sold'] = True
+                
+                _update_storage_entry(cookie_id, update_data)
+                
+                return jsonify({
+                    'status': 'SUCCESS',
+                    'login_link': login_link,
+                    'nftoken': result.get('nftoken'),
+                    'usage': f'{new_usage}/{MAX_USAGE}',
+                    'account': {
+                        'email': result.get('email', '-'),
+                        'plan': result.get('plan', '-'),
+                        'country': result.get('country', '-'),
+                        'owner': result.get('owner', '-'),
+                    }
+                })
+                
+        # Cookie chết → xóa luôn khỏi kho
+        delete_url = f"{SUPABASE_URL}/rest/v1/cookies?id=eq.{cookie_id}"
+        requests.delete(delete_url, headers=_supabase_headers())
 
     return jsonify({
-        'status': 'SUCCESS',
-        'login_link': login_link,
-        'nftoken': result.get('nftoken'),
-        'account': {
-            'email': result.get('email', '-'),
-            'plan': result.get('plan', '-'),
-            'country': result.get('country', '-'),
-            'owner': result.get('owner', '-'),
-            'profiles': result.get('profiles', '-'),
-            'numProfiles': result.get('numProfiles', 0),
-        }
-    })
+        'status': 'ERROR', 
+        'error': 'Thử 5 cookie liên tiếp đều hỏng/hết hạn và đã xóa. Gọi lại API để thử tiếp!'
+    }), 404
 
 
 @app.route('/api/public/check', methods=['POST'])

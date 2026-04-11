@@ -1,7 +1,7 @@
 # 📡 Netflix Cookie API – Tài liệu hướng dẫn
 
 > **Base URL:** `https://nft-netflix.onrender.com`  
-> **Phiên bản:** 1.0  
+> **Phiên bản:** 2.0  
 > **Cập nhật:** 11/04/2026
 
 ---
@@ -10,7 +10,7 @@
 
 1. [Tổng quan](#1-tổng-quan)
 2. [Danh sách cookie – GET /api/public/list](#2-danh-sách-cookie)
-3. [Lấy link đăng nhập – POST /api/public/get-login-link](#3-lấy-link-đăng-nhập)
+3. [Lấy link tự động – GET /api/public/get-link](#3-lấy-link-tự-động)
 4. [Kiểm tra cookie – POST /api/public/check](#4-kiểm-tra-cookie)
 5. [Đăng nhập TV – POST /api/public/tv-login](#5-đăng-nhập-tv)
 6. [Mã lỗi](#6-mã-lỗi)
@@ -22,17 +22,18 @@
 
 API cho phép website bên ngoài:
 - Truy xuất danh sách cookie Netflix đã lưu trong kho Supabase
-- Tạo link đăng nhập tự động (nftoken) từ cookie đã lưu
+- **Tự động lấy link đăng nhập** (xoay vòng luân phiên, đếm lượt sử dụng, tối đa 5 lượt/cookie)
 - Kiểm tra cookie còn hợp lệ (LIVE) hay đã hết hạn (DEAD)
 - Đăng nhập Netflix trên Smart TV bằng mã code
 
 ### Luồng sử dụng
 
 ```
-Bước 1                    Bước 2                    Bước 3
-GET /api/public/list  →   Chọn 1 cookie (lấy ID) →  POST check (kiểm tra)
-                                                     POST get-login-link
-                                                     POST tv-login
+Cách 1 (Auto - Khuyên dùng):
+  GET /api/public/get-link  →  Nhận link ngay (hệ thống tự chọn cookie, xoay vòng)
+
+Cách 2 (Thủ công):
+  GET /api/public/list  →  Chọn 1 cookie (lấy ID)  →  POST check / POST tv-login
 ```
 
 ### Lưu ý bảo mật
@@ -80,6 +81,8 @@ Không cần tham số.
     "maxStreams": "4",
     "login_link": "https://netflix.com/?nftoken=abc123...",
     "nftoken": "abc123...",
+    "usage_count": 2,
+    "sold": false,
     "label": ""
   }
 ]
@@ -102,6 +105,8 @@ Không cần tham số.
 | `maxStreams`     | `string`  | Số luồng phát tối đa                        |
 | `login_link`    | `string`  | Link đăng nhập tự động (có thể cũ/hết hạn)  |
 | `nftoken`       | `string`  | Mã token đăng nhập                          |
+| `usage_count`   | `integer` | Số lượt đã được lấy link (tối đa 5)         |
+| `sold`          | `boolean` | `true` = đã bán hết 5 slot                  |
 | `label`         | `string`  | Nhãn tùy chỉnh                              |
 
 ### Ví dụ
@@ -117,7 +122,7 @@ const res = await fetch('https://nft-netflix.onrender.com/api/public/list');
 const cookies = await res.json();
 
 cookies.forEach(item => {
-  console.log(item.id, item.email, item.plan);
+  console.log(item.id, item.email, item.plan, `(${item.usage_count}/5)`);
 });
 ```
 
@@ -134,25 +139,20 @@ for item in cookies:
 
 ---
 
-## 3. Lấy link đăng nhập
+## 3. Lấy link tự động
 
-Tạo link đăng nhập Netflix tự động từ cookie đã lưu. Link mới sẽ được cập nhật lại vào kho lưu trữ.
+API thông minh tự động lấy link đăng nhập Netflix. Hệ thống sẽ:
+- Tự chọn cookie **chưa bán** (`sold=false`), xoay vòng luân phiên (round-robin)
+- Tự kiểm tra cookie còn sống không, nếu chết → xóa và thử cái tiếp theo
+- Đếm số lượt sử dụng (tối đa **5 lượt/cookie**), đủ 5 → đánh dấu `sold=true`
 
 ```
-POST /api/public/get-login-link
+GET hoặc POST /api/public/get-link
 ```
 
-### Request Body
+### Request
 
-| Tham số | Kiểu           | Bắt buộc | Mô tả                                     |
-|---------|----------------|----------|--------------------------------------------|
-| `id`    | `string (uuid)` | ✅ Có    | ID cookie lấy từ `/api/public/list`        |
-
-```json
-{
-  "id": "3aa4efa7-f20b-4973-8f3a-b9ffb60c308e"
-}
-```
+Không cần tham số. Chỉ cần gọi API là nhận link.
 
 ### Response thành công `200 OK`
 
@@ -161,48 +161,66 @@ POST /api/public/get-login-link
   "status": "SUCCESS",
   "login_link": "https://netflix.com/?nftoken=abc123...",
   "nftoken": "abc123...",
+  "usage": "3/5",
   "account": {
     "email": "user@gmail.com",
     "plan": "Premium",
     "country": "US",
-    "owner": "Nguyễn Văn A",
-    "profiles": "User1, User2",
-    "numProfiles": 2
+    "owner": "Nguyễn Văn A"
   }
 }
 ```
 
+| Trường       | Mô tả                                          |
+|--------------|-------------------------------------------------|
+| `login_link` | Link đăng nhập Netflix tự động                  |
+| `nftoken`    | Mã token gốc                                   |
+| `usage`      | Số lượt đã dùng / tối đa (VD: `3/5`)           |
+| `account`    | Thông tin tài khoản (email, gói, quốc gia, chủ) |
+
 ### Response thất bại
 
+**Kho trống hoặc tất cả đã bán:**
 ```json
 {
   "status": "ERROR",
-  "error": "Cookie hết hạn hoặc không hợp lệ"
+  "error": "Kho hết cookie khả dụng (tất cả đã bán hoặc trống)"
 }
+```
+
+**5 cookie thử liên tiếp đều chết (gọi lại để thử tiếp):**
+```json
+{
+  "status": "ERROR",
+  "error": "Thử 5 cookie liên tiếp đều hỏng/hết hạn và đã xóa. Gọi lại API để thử tiếp!"
+}
+```
+
+### Cơ chế xoay vòng
+
+```
+Lần gọi 1 → Cookie A (usage: 1/5) → trả link A, đẩy A xuống cuối hàng
+Lần gọi 2 → Cookie B (usage: 1/5) → trả link B, đẩy B xuống cuối hàng
+Lần gọi 3 → Cookie C (usage: 1/5) → trả link C, đẩy C xuống cuối hàng
+...xoay vòng...
+Lần gọi 5*N → Cookie E (usage: 5/5) → đánh dấu sold=true, loại khỏi hàng
 ```
 
 ### Ví dụ
 
 **cURL:**
 ```bash
-curl -X POST "https://nft-netflix.onrender.com/api/public/get-login-link" \
-  -H "Content-Type: application/json" \
-  -d '{"id": "3aa4efa7-f20b-4973-8f3a-b9ffb60c308e"}'
+curl "https://nft-netflix.onrender.com/api/public/get-link"
 ```
 
 **JavaScript:**
 ```javascript
-const res = await fetch('https://nft-netflix.onrender.com/api/public/get-login-link', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ id: '3aa4efa7-f20b-4973-8f3a-b9ffb60c308e' })
-});
+const res = await fetch('https://nft-netflix.onrender.com/api/public/get-link');
 const data = await res.json();
 
 if (data.status === 'SUCCESS') {
-  console.log('Link:', data.login_link);
-  // Mở link để đăng nhập tự động
-  window.open(data.login_link);
+  console.log('✅ Link:', data.login_link);
+  console.log('📊 Đã dùng:', data.usage);
 }
 ```
 
@@ -210,21 +228,19 @@ if (data.status === 'SUCCESS') {
 ```python
 import requests
 
-res = requests.post(
-    "https://nft-netflix.onrender.com/api/public/get-login-link",
-    json={"id": "3aa4efa7-f20b-4973-8f3a-b9ffb60c308e"}
-)
+res = requests.get("https://nft-netflix.onrender.com/api/public/get-link")
 data = res.json()
 
 if data["status"] == "SUCCESS":
-    print("Link đăng nhập:", data["login_link"])
+    print("Link:", data["login_link"])
+    print("Đã dùng:", data["usage"])
 ```
 
 ---
 
 ## 4. Kiểm tra cookie
 
-Kiểm tra xem cookie đã lưu trong kho còn hợp lệ hay đã hết hạn. Không tạo token (nhanh hơn get-login-link).
+Kiểm tra xem cookie đã lưu trong kho còn hợp lệ hay đã hết hạn. Không tạo token (nhanh hơn get-link).
 
 ```
 POST /api/public/check
@@ -233,7 +249,7 @@ POST /api/public/check
 ### Request Body
 
 | Tham số | Kiểu           | Bắt buộc | Mô tả                                     |
-|---------|----------------|----------|--------------------------------------------|
+|---------|----------------|----------|---------------------------------------------|
 | `id`    | `string (uuid)` | ✅ Có    | ID cookie lấy từ `/api/public/list`        |
 
 ```json
@@ -270,15 +286,6 @@ POST /api/public/check
 }
 ```
 
-### Response – Lỗi
-
-```json
-{
-  "status": "ERROR",
-  "error": "Không tìm thấy cookie trong kho"
-}
-```
-
 ### Ví dụ
 
 **cURL:**
@@ -301,8 +308,6 @@ if (data.status === 'LIVE') {
   console.log('✅ Cookie hợp lệ!', data.account.plan, data.account.country);
 } else if (data.status === 'DEAD') {
   console.log('❌ Cookie đã hết hạn');
-} else {
-  console.log('⚠️ Lỗi:', data.error);
 }
 ```
 
@@ -321,8 +326,6 @@ if data["status"] == "LIVE":
     print(f"✅ Hợp lệ: {acc['email']} - {acc['plan']} ({acc['country']})")
 elif data["status"] == "DEAD":
     print("❌ Cookie đã hết hạn")
-else:
-    print("⚠️ Lỗi:", data.get("error"))
 ```
 
 ---
@@ -371,12 +374,6 @@ POST /api/public/tv-login
 {
   "status": "ERROR",
   "error": "Cookie DEAD."
-}
-
-// Thiếu authURL
-{
-  "status": "ERROR",
-  "error": "Không tìm thấy authURL. Cookie cần có SecureNetflixId và nfvdid."
 }
 
 // Mã TV sai hoặc hết hạn
@@ -449,20 +446,56 @@ else:
 |-----------|--------------------------------------------------------|
 | `200`     | Thành công                                             |
 | `400`     | Thiếu tham số bắt buộc                                |
-| `404`     | Không tìm thấy cookie với ID được cung cấp            |
+| `404`     | Không tìm thấy cookie / kho trống                     |
 | `500`     | Lỗi kết nối kho lưu trữ Supabase                     |
 
 ---
 
 ## 7. Ví dụ tích hợp
 
-### Tích hợp vào website HTML/JS
+### Tích hợp Auto (Khuyên dùng)
 
 ```html
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Netflix Login</title>
+  <title>Netflix Auto Link</title>
+</head>
+<body>
+  <h1>Lấy tài khoản Netflix tự động</h1>
+  <button onclick="getLink()">🎬 Nhận Link Netflix</button>
+  <div id="result"></div>
+
+  <script>
+    const API = 'https://nft-netflix.onrender.com';
+
+    async function getLink() {
+      document.getElementById('result').textContent = '⏳ Đang tìm tài khoản...';
+      
+      const res = await fetch(`${API}/api/public/get-link`);
+      const data = await res.json();
+
+      if (data.status === 'SUCCESS') {
+        document.getElementById('result').innerHTML =
+          `✅ <a href="${data.login_link}" target="_blank">Mở Netflix →</a>
+           <br>Gói: ${data.account.plan} | Quốc gia: ${data.account.country}
+           <br>Đã dùng: ${data.usage}`;
+      } else {
+        document.getElementById('result').textContent = '❌ ' + data.error;
+      }
+    }
+  </script>
+</body>
+</html>
+```
+
+### Tích hợp thủ công (Chọn tài khoản + TV Login)
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Netflix Manual</title>
 </head>
 <body>
   <h1>Chọn tài khoản Netflix</h1>
@@ -470,8 +503,6 @@ else:
   <select id="account-select">
     <option value="">-- Chọn tài khoản --</option>
   </select>
-
-  <button onclick="getLink()">Lấy Link Đăng Nhập</button>
 
   <div>
     <input id="tv-code" placeholder="Nhập mã TV (8 ký tự)">
@@ -483,7 +514,6 @@ else:
   <script>
     const API = 'https://nft-netflix.onrender.com';
 
-    // Bước 1: Load danh sách tài khoản
     async function loadAccounts() {
       const res = await fetch(`${API}/api/public/list`);
       const list = await res.json();
@@ -497,28 +527,6 @@ else:
       });
     }
 
-    // Bước 2a: Lấy link đăng nhập
-    async function getLink() {
-      const id = document.getElementById('account-select').value;
-      if (!id) return alert('Chọn tài khoản trước');
-
-      const res = await fetch(`${API}/api/public/get-login-link`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id })
-      });
-      const data = await res.json();
-
-      if (data.status === 'SUCCESS') {
-        document.getElementById('result').innerHTML =
-          `<a href="${data.login_link}" target="_blank">Mở Netflix →</a>
-           <br>Gói: ${data.account.plan} | Quốc gia: ${data.account.country}`;
-      } else {
-        document.getElementById('result').textContent = '❌ ' + data.error;
-      }
-    }
-
-    // Bước 2b: Đăng nhập TV
     async function tvLogin() {
       const id = document.getElementById('account-select').value;
       const code = document.getElementById('tv-code').value.trim();
