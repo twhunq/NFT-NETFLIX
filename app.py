@@ -199,23 +199,29 @@ def api_check_bulk():
             })
 
     def generate():
+        import time
         yield f"data: {json.dumps({'type': 'start', 'total': total})}\n\n"
 
-        # Kích hoạt Đa Luồng (Multi-threading) 10 công nhân chạy song song
-        # Do session đã được cách ly tuyệt đối, không còn lo lây lan lỗi
-        workers = min(10, total)
+        # Số luồng cấu hình qua env BULK_WORKERS (mặc định 3 cho Render free)
+        max_workers = int(os.environ.get('BULK_WORKERS', '3'))
+        workers = min(max_workers, total)
+
         with ThreadPoolExecutor(max_workers=workers) as executor:
             for i, line in enumerate(cookies):
                 executor.submit(worker, i, line)
+                # Delay nhẹ mỗi batch để tránh Netflix rate-limit IP server
+                if i > 0 and i % workers == 0:
+                    time.sleep(0.3)
 
             checked = 0
             live_count = 0
             dead_count = 0
             error_count = 0
+            last_heartbeat = time.time()
 
             while checked < total:
                 try:
-                    item = result_queue.get(timeout=120)
+                    item = result_queue.get(timeout=5)
                     checked += 1
 
                     status = item['result'].get('status', 'ERROR')
@@ -237,8 +243,12 @@ def api_check_bulk():
                         'result': item['result'],
                     }
                     yield f"data: {json.dumps(event_data)}\n\n"
+                    last_heartbeat = time.time()
                 except queue.Empty:
-                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                    # Gửi heartbeat mỗi 15s để Render proxy không ngắt kết nối
+                    if time.time() - last_heartbeat > 15:
+                        yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                        last_heartbeat = time.time()
 
         summary = {
             'type': 'complete',
