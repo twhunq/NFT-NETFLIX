@@ -513,23 +513,31 @@
     $('#btn-save-to-storage').addEventListener('click', async () => {
         const btn = $('#btn-save-to-storage');
         const oldText = btn.textContent;
-        btn.textContent = 'ĐANG LƯU...';
         btn.disabled = true;
 
         let savedCount = 0;
-        const savePromises = bulkResults.filter(item => item.result.status === 'LIVE').map(async (item) => {
-            const r = item.result;
-            const fileObj = bulkFiles[item.index];
-            if (!fileObj) return;
-            try {
-                const text = await fileObj.text();
-                await autoSaveCookie(text, r);
-                savedCount++;
-            } catch(e) {}
-        });
+        const liveItems = bulkResults.filter(item => item.result.status === 'LIVE');
+        const CHUNK_SIZE = 5;
 
-        await Promise.all(savePromises);
-        
+        for (let i = 0; i < liveItems.length; i += CHUNK_SIZE) {
+            const chunk = liveItems.slice(i, i + CHUNK_SIZE);
+            const promises = chunk.map(async (item) => {
+                const r = item.result;
+                const fileObj = bulkFiles[item.index];
+                if (!fileObj) return;
+                try {
+                    const text = await fileObj.text();
+                    await autoSaveCookie(text, r);
+                    savedCount++;
+                } catch(e) {}
+            });
+            await Promise.all(promises);
+            
+            // Cập nhật phần trăm tiến độ lưu
+            const percent = Math.round(Math.min((i + CHUNK_SIZE) / liveItems.length * 100, 100));
+            btn.textContent = `ĐANG LƯU... ${percent}%`;
+        }
+
         if (savedCount > 0) {
             toast(`Đã lưu ${savedCount} cookie hợp lệ vào kho`, 'success');
         } else {
