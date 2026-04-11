@@ -587,6 +587,62 @@ def api_public_get_login_link():
     })
 
 
+@app.route('/api/public/check', methods=['POST'])
+def api_public_check():
+    """
+    Kiểm tra cookie còn hợp lệ không, truy xuất từ kho lưu trữ.
+    
+    Request JSON:
+        { "id": "<uuid của cookie trong kho>" }
+    
+    Response JSON (hợp lệ):
+        {
+            "status": "LIVE",
+            "account": { "email", "plan", "country", "owner", ... }
+        }
+    
+    Response JSON (hết hạn):
+        { "status": "DEAD" }
+    """
+    data = request.get_json()
+    if not data or not data.get('id'):
+        return jsonify({'status': 'ERROR', 'error': 'Thiếu ID cookie'}), 400
+
+    cookie_text, err = _fetch_cookie_from_storage(data['id'])
+    if err:
+        return err
+
+    if not cookie_text:
+        return jsonify({'status': 'ERROR', 'error': 'Cookie trống'}), 400
+
+    # Kiểm tra nhanh (không tạo token để tăng tốc)
+    result = process_cookie(cookie_text, generate_token=False)
+
+    if result.get('status') == 'LIVE':
+        return jsonify({
+            'status': 'LIVE',
+            'account': {
+                'email': result.get('email', '-'),
+                'plan': result.get('plan', '-'),
+                'country': result.get('country', '-'),
+                'owner': result.get('owner', '-'),
+                'profiles': result.get('profiles', '-'),
+                'numProfiles': result.get('numProfiles', 0),
+                'billing': result.get('billing', '-'),
+                'videoQuality': result.get('videoQuality', '-'),
+                'maxStreams': result.get('maxStreams', '-'),
+                'memberSince': result.get('memberSince', '-'),
+            }
+        })
+    elif result.get('status') == 'DEAD':
+        return jsonify({'status': 'DEAD'})
+    else:
+        return jsonify({
+            'status': 'ERROR',
+            'error': result.get('error', 'Lỗi không xác định')
+        })
+
+
 @app.route('/api/public/tv-login', methods=['POST'])
 def api_public_tv_login():
     """
