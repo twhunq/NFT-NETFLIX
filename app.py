@@ -890,8 +890,8 @@ def _fetch_mbbank_transactions():
     resp.raise_for_status()
     data = resp.json()
 
-    if data.get('status') == 'success' and data.get('transactions'):
-        return data['transactions']
+    if data.get('status') == 'success':
+        return data.get('transactions') or []
 
     raise Exception(data.get('message', 'Lỗi từ MB Bank API'))
 
