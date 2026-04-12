@@ -837,9 +837,165 @@ def api_public_list():
 
 
 # ══════════════════════════════════════════════════════════════════════
+#  MB Bank Auto-Check Payment (cho Netflix Premium Store)
+# ══════════════════════════════════════════════════════════════════════
+
+import time as _time
+
+# Rate limiting cho MB Bank check
+_mbbank_rate_limit = {}
+_MBBANK_RATE_WINDOW = 60  # 60 seconds
+_MBBANK_RATE_MAX = 15     # 15 requests per window
+_mbbank_processing = set()
+
+
+def _mbbank_check_rate_limit(key):
+    now = _time.time()
+    entry = _mbbank_rate_limit.get(key)
+    if not entry or now > entry['reset_time']:
+        _mbbank_rate_limit[key] = {'count': 1, 'reset_time': now + _MBBANK_RATE_WINDOW}
+        return True
+    if entry['count'] >= _MBBANK_RATE_MAX:
+        return False
+    entry['count'] += 1
+    return True
+
+
+def _fetch_mbbank_transactions():
+    """
+    Gọi apicanhan.com để lấy lịch sử giao dịch MB Bank.
+    Cần env vars: APICANHAN_KEY, MBBANK_USERNAME, MBBANK_PASSWORD, MBBANK_ACCOUNT
+    """
+    api_key = os.environ.get('APICANHAN_KEY', '')
+    username = os.environ.get('MBBANK_USERNAME', '')
+    password = os.environ.get('MBBANK_PASSWORD', '')
+    account_no = os.environ.get('MBBANK_ACCOUNT', '')
+
+    if not all([api_key, username, password, account_no]):
+        raise Exception('Missing MB Bank env configuration (APICANHAN_KEY, MBBANK_USERNAME, MBBANK_PASSWORD, MBBANK_ACCOUNT)')
+
+    params = {
+        'key': api_key,
+        'username': username,
+        'password': password,
+        'accountNo': account_no,
+    }
+
+    resp = requests.get(
+        'https://apicanhan.com/api/mbbankv3',
+        params=params,
+        headers={'accept': 'application/json'},
+        timeout=30
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    if data.get('status') == 'success' and data.get('transactions'):
+        return data['transactions']
+
+    raise Exception(data.get('message', 'Lỗi từ MB Bank API'))
+
+
+def _find_matching_transaction(transactions, amount, content):
+    """
+    So khớp giao dịch: số tiền gần đúng (±1000đ) + nội dung CK chứa mã đơn hàng.
+    """
+    target_amount = int(amount)
+    target_content = content.upper().strip()
+
+    for tx in transactions:
+        tx_amount = abs(int(tx.get('amount', '0') or '0'))
+        amount_match = abs(tx_amount - target_amount) <= 1000
+
+        tx_desc = (tx.get('description', '') or '').upper()
+        content_match = target_content in tx_desc
+
+        if amount_match and content_match:
+            return {
+                'transactionID': tx.get('transactionID', tx.get('refNo', '')),
+                'amount': str(tx_amount),
+                'description': tx.get('description', ''),
+                'transactionDate': tx.get('transactionDate', ''),
+            }
+
+    return None
+
+
+@app.route('/api/mbbank/check', methods=['POST'])
+def api_mbbank_check():
+    """
+    Kiểm tra giao dịch MB Bank, so khớp với đơn hàng từ Netflix Premium Store.
+    
+    Request JSON:
+        {
+            "invoiceCode": "NFLXxxxxxx",
+            "amount": 20000,
+            "content": "NFLXxxxxxx"
+        }
+    
+    Response JSON:
+        { "success": true, "paid": true/false, "transactionId": "...", ... }
+    """
+    try:
+        body = request.get_json(force=True)
+        invoice_code = body.get('invoiceCode', '')
+        amount = body.get('amount', 0)
+        content = body.get('content', '')
+
+        if not invoice_code:
+            return jsonify({'success': False, 'paid': False, 'message': 'Thiếu invoiceCode'}), 400
+
+        # Rate limiting
+        rate_key = f'mbbank_{invoice_code}'
+        if not _mbbank_check_rate_limit(rate_key):
+            return jsonify({'success': False, 'paid': False, 'message': 'Quá nhiều yêu cầu. Đợi 1 phút.'}), 429
+
+        # Prevent race condition
+        if invoice_code in _mbbank_processing:
+            return jsonify({'success': True, 'paid': False, 'message': 'Đang xử lý'})
+
+        # Fetch transactions from MB Bank via apicanhan.com
+        try:
+            transactions = _fetch_mbbank_transactions()
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'paid': False,
+                'message': f'Lỗi kết nối MB Bank: {str(e)}'
+            }), 500
+
+        # Find matching transaction
+        match = _find_matching_transaction(transactions, amount, content)
+
+        if match:
+            _mbbank_processing.add(invoice_code)
+            try:
+                return jsonify({
+                    'success': True,
+                    'paid': True,
+                    'transactionId': match['transactionID'],
+                    'transactionDate': match['transactionDate'],
+                    'amount': match['amount'],
+                    'message': 'Đã phát hiện thanh toán!'
+                })
+            finally:
+                _mbbank_processing.discard(invoice_code)
+
+        return jsonify({
+            'success': True,
+            'paid': False,
+            'message': 'Chưa phát hiện thanh toán'
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'paid': False, 'message': f'Lỗi server: {str(e)}'}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════
 #  Entry Point
 # ══════════════════════════════════════════════════════════════════════
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
+
