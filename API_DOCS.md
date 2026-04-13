@@ -23,8 +23,8 @@
 API cho phép website bên ngoài:
 - Truy xuất danh sách cookie Netflix đã lưu trong kho Supabase
 - **Tự động lấy link đăng nhập** (xoay vòng luân phiên, đếm lượt sử dụng, tối đa 5 lượt/cookie)
-- Kiểm tra cookie còn hợp lệ (LIVE) hay đã hết hạn (DEAD)
-- Đăng nhập Netflix trên Smart TV bằng mã code
+- Kiểm tra cookie còn hợp lệ (LIVE) hay
+
 
 ### Luồng sử dụng
 
