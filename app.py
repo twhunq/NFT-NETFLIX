@@ -560,7 +560,7 @@ def api_public_get_link():
     Cách hoạt động:
       1. Lấy 5 cookie CHƯA BÁN (sold=false), ưu tiên cái lâu chưa dùng nhất.
       2. Kiểm tra lần lượt, cái nào SỐNG → trả link + tăng usage_count.
-      3. Khi usage_count đạt 5 → đánh dấu sold=true (đã bán hết slot).
+      3. Khi usage_count đạt 3 → đánh dấu sold=true (đã bán hết slot).
       4. Cái nào CHẾT → xóa khỏi kho luôn.
       5. Sau mỗi lần trả link, đẩy cookie xuống cuối hàng chờ (xoay vòng).
     
@@ -569,13 +569,13 @@ def api_public_get_link():
             "status": "SUCCESS",
             "login_link": "https://netflix.com/?nftoken=...",
             "nftoken": "...",
-            "usage": "3/5",
+            "usage": "1/3",
             "account": { "email", "plan", "country", "owner" }
         }
     Response JSON (thất bại):
         { "status": "ERROR", "error": "..." }
     """
-    MAX_USAGE = 5  # Tối đa 5 lần lấy link cho mỗi cookie
+    MAX_USAGE = 3  # Tối đa 3 lần lấy link cho mỗi cookie
 
     # Lấy 5 cookie CHƯA BÁN, lâu chưa dùng nhất (xoay vòng)
     url = (
