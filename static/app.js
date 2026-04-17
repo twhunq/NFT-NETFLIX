@@ -310,7 +310,7 @@
         $('#bulk-prog-lbl').textContent = 'Đang xử lý...';
 
         let currentBatch = 0;
-        const BATCH_SIZE = 80;
+        const BATCH_SIZE = 20;
         const totalFiles = bulkFiles.length;
         
         let globalChecked = 0;

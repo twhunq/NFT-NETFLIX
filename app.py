@@ -203,7 +203,7 @@ def api_check_bulk():
         yield f"data: {json.dumps({'type': 'start', 'total': total})}\n\n"
 
         # Số luồng cấu hình qua env BULK_WORKERS (mặc định 3 cho Render free)
-        max_workers = int(os.environ.get('BULK_WORKERS', '3'))
+        max_workers = int(os.environ.get('BULK_WORKERS', '1'))
         workers = min(max_workers, total)
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
