@@ -31,31 +31,37 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 def process_cookie(cookie_input, generate_token=True):
     """Process a single cookie and return a comprehensive result dict.
     Mirrors the logic in main.py's process_one() but returns JSON-friendly data.
+
+    Tối ưu hoá: chạy song song các HTTP request không phụ thuộc nhau.
+      Phase A: check_account_info ‖ check_country  (cùng input cookie cơ bản)
+      Phase B: fetch_extra_account_info ‖ generate_nftoken  (cùng cookie_dict đầy đủ)
+    Giảm ~50% thời gian/cookie so với gọi tuần tự.
     """
     netflix_id, secure_id, extras = _parse_cookie_input(cookie_input)
 
     if not netflix_id:
         return {'status': 'ERROR', 'error': 'Could not parse NetflixId from input'}
 
-    # Step 1: Account info
-    info, collected_cookies = check_account_info(netflix_id, secure_id, extra_cookies=extras)
-
     base_cookie_dict = {'NetflixId': netflix_id}
     if secure_id:
         base_cookie_dict['SecureNetflixId'] = secure_id
     base_cookie_dict.update(extras)
 
+    # Phase A: account_info và country chạy song song (chỉ cần netflix_id/secure_id)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_info = pool.submit(check_account_info, netflix_id, secure_id, extras)
+        f_country = pool.submit(check_country, netflix_id, secure_id)
+        info, collected_cookies = f_info.result()
+        country = f_country.result()
+
     if info['status'] != 'LIVE':
         return info
 
-    # Step 2: Country
-    country = check_country(netflix_id, secure_id)
-
-    # Step 3: Build full cookie dict
+    # Build full cookie dict cho Phase B
     cookie_dict = dict(base_cookie_dict)
     cookie_dict.update(collected_cookies)
 
-    # Step 3.5: Extra info from /browse when fields are incomplete
+    # Quyết định có cần gọi /browse không
     current_profiles = (
         [p.strip() for p in (info.get("profiles") or "").split(",") if p.strip()]
         if info.get("profiles") not in ("-", "") else []
@@ -70,47 +76,59 @@ def process_cookie(cookie_input, generate_token=True):
         current_num_profiles <= 1 or
         len(current_profiles) <= 1
     )
-    if need_extra:
-        try:
-            extra = fetch_extra_account_info(cookie_dict)
-            for key in ("email", "owner", "profiles", "country",
-                        "membershipStatus", "authURL", "numProfiles"):
-                if info.get(key, "-") == "-" and extra.get(key):
-                    info[key] = extra[key]
-                elif key == "numProfiles" and info.get(key, 0) == 0 and extra.get(key):
-                    info[key] = extra[key]
 
-            if extra.get("profiles"):
-                extra_profiles = [p.strip() for p in extra["profiles"].split(",") if p.strip()]
-                cur_p = (
-                    [p.strip() for p in info.get("profiles", "-").split(",") if p.strip()]
-                    if info.get("profiles") not in ("-", "") else []
-                )
-                if info.get("profiles") in ("-", "") or len(extra_profiles) > len(cur_p):
-                    info["profiles"] = extra["profiles"]
-
-            if extra.get("numProfiles"):
-                info["numProfiles"] = max(
-                    int(info.get("numProfiles", 0) or 0),
-                    int(extra["numProfiles"])
-                )
-
-            if info.get("numProfiles", 0) == 0 and extra.get("profiles"):
-                info["numProfiles"] = len(
-                    [p.strip() for p in extra["profiles"].split(",") if p.strip()]
-                )
-        except Exception:
-            pass
-
-    # Update country if available from extra info
-    if country in ("Unknown", "-") and info.get("country") not in ("-", "Unknown"):
-        country = info["country"]
-
-    # Step 4: NFToken
+    # Phase B: extra_info và nftoken chạy song song
+    extra = {}
     token = None
     token_error = None
-    if generate_token:
-        token, token_error = generate_nftoken(cookie_dict)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_extra = pool.submit(fetch_extra_account_info, cookie_dict) if need_extra else None
+        f_token = pool.submit(generate_nftoken, cookie_dict) if generate_token else None
+
+        if f_extra is not None:
+            try:
+                extra = f_extra.result() or {}
+            except Exception:
+                extra = {}
+
+        if f_token is not None:
+            try:
+                token, token_error = f_token.result()
+            except Exception as e:
+                token, token_error = None, str(e)
+
+    # Merge extra info vào info (giữ nguyên logic cũ)
+    if need_extra and extra:
+        for key in ("email", "owner", "profiles", "country",
+                    "membershipStatus", "authURL", "numProfiles"):
+            if info.get(key, "-") == "-" and extra.get(key):
+                info[key] = extra[key]
+            elif key == "numProfiles" and info.get(key, 0) == 0 and extra.get(key):
+                info[key] = extra[key]
+
+        if extra.get("profiles"):
+            extra_profiles = [p.strip() for p in extra["profiles"].split(",") if p.strip()]
+            cur_p = (
+                [p.strip() for p in info.get("profiles", "-").split(",") if p.strip()]
+                if info.get("profiles") not in ("-", "") else []
+            )
+            if info.get("profiles") in ("-", "") or len(extra_profiles) > len(cur_p):
+                info["profiles"] = extra["profiles"]
+
+        if extra.get("numProfiles"):
+            info["numProfiles"] = max(
+                int(info.get("numProfiles", 0) or 0),
+                int(extra["numProfiles"])
+            )
+
+        if info.get("numProfiles", 0) == 0 and extra.get("profiles"):
+            info["numProfiles"] = len(
+                [p.strip() for p in extra["profiles"].split(",") if p.strip()]
+            )
+
+    # Update country nếu lấy được từ /browse
+    if country in ("Unknown", "-") and info.get("country") not in ("-", "Unknown"):
+        country = info["country"]
 
     currency = CURRENCY_MAP.get(country, '?')
     membership = info.get('membershipStatus', '-')
@@ -202,16 +220,16 @@ def api_check_bulk():
         import time
         yield f"data: {json.dumps({'type': 'start', 'total': total})}\n\n"
 
-        # Số luồng cấu hình qua env BULK_WORKERS (mặc định 3 cho Render free)
-        max_workers = int(os.environ.get('BULK_WORKERS', '1'))
+        # Số luồng cấu hình qua env BULK_WORKERS (mặc định 5 cho Render free).
+        # Mỗi worker tự song song hoá các HTTP request bên trong process_cookie,
+        # nên tổng số request đồng thời tới Netflix ~= BULK_WORKERS * 2.
+        # Tăng quá cao có thể bị Netflix rate-limit theo IP → quan sát tỉ lệ ERROR.
+        max_workers = int(os.environ.get('BULK_WORKERS', '5'))
         workers = min(max_workers, total)
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
             for i, line in enumerate(cookies):
                 executor.submit(worker, i, line)
-                # Delay nhẹ mỗi batch để tránh Netflix rate-limit IP server
-                if i > 0 and i % workers == 0:
-                    time.sleep(0.3)
 
             checked = 0
             live_count = 0
