@@ -1,6 +1,11 @@
 (function() {
     'use strict';
 
+    console.log('[app.js] loaded v=7');
+    window.addEventListener('unhandledrejection', (e) => {
+        console.error('[app.js] UNHANDLED REJECTION:', e.reason);
+    });
+
     const $ = (sel) => document.querySelector(sel);
     const $$ = (sel) => document.querySelectorAll(sel);
 
@@ -331,8 +336,9 @@
         let globalDead = 0;
         let globalError = 0;
 
-        function processNextBatch() {
+        async function processNextBatch() {
             if (currentBatch * BATCH_SIZE >= totalFiles) {
+                console.log('[bulk] DONE all batches', {totalFiles, globalChecked});
                 bulkRunning = false;
                 document.removeEventListener('visibilitychange', onVisChange);
                 setLoading('#btn-run-bulk', false);
@@ -345,61 +351,81 @@
                 return;
             }
 
+            const batchIdx = currentBatch + 1;
             const offset = currentBatch * BATCH_SIZE;
             const batchFiles = bulkFiles.slice(offset, offset + BATCH_SIZE);
             const fd = new FormData();
             batchFiles.forEach(f => fd.append('files', f));
 
-            fetch('/api/check-bulk', { method: 'POST', body: fd })
-                .then(res => {
-                    const reader = res.body.getReader();
-                    const decoder = new TextDecoder();
-                    let buf = '';
+            console.log(`[bulk] START batch ${batchIdx} (${batchFiles.length} files, offset ${offset})`);
+            let batchReceived = 0;
 
-                    function readStream() {
-                        reader.read().then(({done, value}) => {
-                            if (done) { 
-                                currentBatch++;
-                                processNextBatch();
-                                return; 
-                            }
-                            buf += decoder.decode(value, {stream: true});
-                            let parts = buf.split('\n\n');
-                            buf = parts.pop() || '';
-                            parts.forEach(p => {
-                                if (p.startsWith('data: ')) {
-                                    try { 
-                                        let d = JSON.parse(p.substring(6));
-                                        if (d.type === 'result') {
-                                            globalChecked++;
-                                            if (d.result.status === 'LIVE') globalLive++;
-                                            else if (d.result.status === 'DEAD') globalDead++;
-                                            else globalError++;
+            try {
+                const res = await fetch('/api/check-bulk', {method: 'POST', body: fd});
+                if (!res.ok) throw new Error('HTTP ' + res.status);
 
-                                            handleBulkSSE({
-                                                type: 'result',
-                                                checked: globalChecked,
-                                                total: totalFiles,
-                                                live: globalLive,
-                                                dead: globalDead,
-                                                error: globalError,
-                                                index: offset + d.index,
-                                                result: d.result
-                                            });
-                                        }
-                                    } catch(e){}
-                                }
-                            });
-                            readStream();
-                        });
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buf = '';
+
+                while (true) {
+                    let chunk;
+                    try {
+                        chunk = await reader.read();
+                    } catch (readErr) {
+                        console.error(`[bulk] READ ERROR batch ${batchIdx}:`, readErr);
+                        throw readErr;
                     }
-                    readStream();
-                })
-                .catch(e => {
-                    toast('Lỗi batch ' + (currentBatch + 1) + ': ' + e.message, 'error');
-                    currentBatch++; // Skip this batch and try next
-                    processNextBatch();
-                });
+                    if (chunk.done) break;
+
+                    buf += decoder.decode(chunk.value, {stream: true});
+                    const parts = buf.split('\n\n');
+                    buf = parts.pop() || '';
+                    for (const p of parts) {
+                        if (!p.startsWith('data: ')) continue;
+                        let d;
+                        try { d = JSON.parse(p.substring(6)); }
+                        catch (parseErr) {
+                            console.warn(`[bulk] parse fail:`, p.substring(0, 100));
+                            continue;
+                        }
+                        if (d.type === 'result') {
+                            batchReceived++;
+                            globalChecked++;
+                            if (d.result.status === 'LIVE') globalLive++;
+                            else if (d.result.status === 'DEAD') globalDead++;
+                            else globalError++;
+
+                            try {
+                                handleBulkSSE({
+                                    type: 'result',
+                                    checked: globalChecked,
+                                    total: totalFiles,
+                                    live: globalLive,
+                                    dead: globalDead,
+                                    error: globalError,
+                                    index: offset + d.index,
+                                    result: d.result
+                                });
+                            } catch (uiErr) {
+                                console.error(`[bulk] UI render error:`, uiErr);
+                            }
+                        }
+                    }
+                }
+
+                console.log(`[bulk] DONE batch ${batchIdx}: received ${batchReceived}/${batchFiles.length}`);
+                if (batchReceived < batchFiles.length) {
+                    console.warn(`[bulk] batch ${batchIdx} incomplete: ${batchReceived}/${batchFiles.length} — continue anyway`);
+                }
+            } catch (e) {
+                console.error(`[bulk] FATAL batch ${batchIdx}:`, e);
+                toast('Lỗi batch ' + batchIdx + ': ' + e.message, 'error');
+            } finally {
+                currentBatch++;
+                // Defer next batch một tick để UI update kịp
+                setTimeout(processNextBatch, 0);
+            }
         }
         
         processNextBatch();
