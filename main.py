@@ -552,31 +552,28 @@ def parse_account_info(decoded_html):
 
 def fetch_extra_account_info(cookies):
     """Call Netflix internal API to get structured account and profile data."""
-    session = get_session()
     extra = {}
 
-    # ── Try the /browse page for numProfiles ──
-    try:
-        r = session.get(
-            "https://www.netflix.com/browse",
-            cookies=cookies, allow_redirects=True, timeout=REQUEST_TIMEOUT)
-        if r.status_code == 200:
-            decoded_browse = decode_response(r.text or "")
+    with _create_session() as session:
+        try:
+            r = session.get(
+                "https://www.netflix.com/browse",
+                cookies=cookies, allow_redirects=True, timeout=REQUEST_TIMEOUT)
+            if r.status_code == 200:
+                decoded_browse = decode_response(r.text or "")
 
-            # Extract profile names and derive profiles/numProfiles
-            profile_names = re.findall(r'"profileName"\s*:\s*"([^"]+)"', decoded_browse)
-            if profile_names:
-                unique_profiles = list(dict.fromkeys(_clean_val(p) for p in profile_names))
-                extra["profiles"] = ", ".join(unique_profiles)
-                extra["numProfiles"] = len(unique_profiles)
+                profile_names = re.findall(r'"profileName"\s*:\s*"([^"]+)"', decoded_browse)
+                if profile_names:
+                    unique_profiles = list(dict.fromkeys(_clean_val(p) for p in profile_names))
+                    extra["profiles"] = ", ".join(unique_profiles)
+                    extra["numProfiles"] = len(unique_profiles)
 
-            # Extract numProfiles directly if present and keep the larger value
-            np_match = re.search(r'"numProfiles"\s*:\s*(\d+)', decoded_browse)
-            if np_match:
-                parsed_num = int(np_match.group(1))
-                extra["numProfiles"] = max(extra.get("numProfiles", 0), parsed_num)
-    except Exception:
-        pass
+                np_match = re.search(r'"numProfiles"\s*:\s*(\d+)', decoded_browse)
+                if np_match:
+                    parsed_num = int(np_match.group(1))
+                    extra["numProfiles"] = max(extra.get("numProfiles", 0), parsed_num)
+        except Exception:
+            pass
 
     return extra
 
@@ -621,42 +618,36 @@ def check_account_info(netflix_id, secure_id=None, extra_cookies=None):
     if extra_cookies:
         cookies.update(extra_cookies)
 
-    session = get_session()
+    with _create_session() as session:
+        try:
+            r = session.get(url, cookies=cookies, allow_redirects=True, timeout=REQUEST_TIMEOUT)
 
-    try:
-        r = session.get(url, cookies=cookies, allow_redirects=True, timeout=REQUEST_TIMEOUT)
+            all_cookies = dict(cookies)
+            for name, cookie in r.cookies.items():
+                all_cookies[name] = getattr(cookie, "value", cookie)
 
-        # Collect all cookies from response
-        all_cookies = dict(cookies)
-        for name, cookie in r.cookies.items():
-            all_cookies[name] = getattr(cookie, "value", cookie)
+            final_url = r.url.lower()
+            if "login" in final_url and "account" not in final_url:
+                return {"status": "DEAD"}, all_cookies
 
-        # DEAD: final URL contains "login" (redirected to login page)
-        final_url = r.url.lower()
-        if "login" in final_url and "account" not in final_url:
-            return {"status": "DEAD"}, all_cookies
+            decoded = decode_response(r.text or "")
+            info = parse_account_info(decoded)
 
-        # Parse the page
-        decoded = decode_response(r.text or "")
-        info = parse_account_info(decoded)
+            nfvdid_match = re.search(r'"nfvdid"\s*:\s*"([^"]+)"', decoded)
+            if nfvdid_match and "nfvdid" not in all_cookies:
+                all_cookies["nfvdid"] = nfvdid_match.group(1)
+            if "nfvdid" not in all_cookies:
+                nfvdid_match2 = re.search(r'nfvdid=([^;\s"]+)', decoded)
+                if nfvdid_match2:
+                    all_cookies["nfvdid"] = nfvdid_match2.group(1)
 
-        # Extract nfvdid from page HTML for NFToken generation
-        nfvdid_match = re.search(r'"nfvdid"\s*:\s*"([^"]+)"', decoded)
-        if nfvdid_match and "nfvdid" not in all_cookies:
-            all_cookies["nfvdid"] = nfvdid_match.group(1)
-        if "nfvdid" not in all_cookies:
-            nfvdid_match2 = re.search(r'nfvdid=([^;\s"]+)', decoded)
-            if nfvdid_match2:
-                all_cookies["nfvdid"] = nfvdid_match2.group(1)
+            membership = info.get("membershipStatus", "-")
+            if membership in ("ANONYMOUS", "FORMER_MEMBER", "NON_MEMBER", "NEVER_MEMBER"):
+                return {"status": "DEAD"}, all_cookies
 
-        # DEAD: account has no active membership
-        membership = info.get("membershipStatus", "-")
-        if membership in ("ANONYMOUS", "FORMER_MEMBER", "NON_MEMBER", "NEVER_MEMBER"):
-            return {"status": "DEAD"}, all_cookies
-
-        return info, all_cookies
-    except Exception as e:
-        return {"status": "ERROR", "error": str(e)}, {}
+            return info, all_cookies
+        except Exception as e:
+            return {"status": "ERROR", "error": str(e)}, {}
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -669,35 +660,34 @@ def check_country(netflix_id, secure_id=None):
     if secure_id:
         cookies["SecureNetflixId"] = secure_id
 
-    session = get_session()
+    with _create_session() as session:
+        try:
+            r = session.get(url, cookies=cookies, allow_redirects=False, timeout=REQUEST_TIMEOUT)
+            location = r.headers.get("Location", "")
 
-    try:
-        r = session.get(url, cookies=cookies, allow_redirects=False, timeout=REQUEST_TIMEOUT)
-        location = r.headers.get("Location", "")
+            if "login" in location.lower():
+                return "DEAD"
 
-        if "login" in location.lower():
-            return "DEAD"
+            match = re.search(r'netflix\.com/([a-z]{2})(?:-[a-z]{2})?/billingActivity', location, re.IGNORECASE)
+            if match:
+                return match.group(1).upper()
 
-        match = re.search(r'netflix\.com/([a-z]{2})(?:-[a-z]{2})?/billingActivity', location, re.IGNORECASE)
-        if match:
-            return match.group(1).upper()
+            r2 = session.get(url, cookies=cookies, allow_redirects=True, timeout=REQUEST_TIMEOUT)
+            match = re.search(r'netflix\.com/([a-z]{2})(?:-[a-z]{2})?/billingActivity', r2.url, re.IGNORECASE)
+            if match:
+                return match.group(1).upper()
 
-        r2 = session.get(url, cookies=cookies, allow_redirects=True, timeout=REQUEST_TIMEOUT)
-        match = re.search(r'netflix\.com/([a-z]{2})(?:-[a-z]{2})?/billingActivity', r2.url, re.IGNORECASE)
-        if match:
-            return match.group(1).upper()
+            match = re.search(r'"currentCountry"\s*:\s*"([A-Z]{2})"', r2.text)
+            if match:
+                return match.group(1)
 
-        match = re.search(r'"currentCountry"\s*:\s*"([A-Z]{2})"', r2.text)
-        if match:
-            return match.group(1)
+            match = re.search(r'"country"\s*:\s*"([A-Z]{2})"', r2.text)
+            if match:
+                return match.group(1)
 
-        match = re.search(r'"country"\s*:\s*"([A-Z]{2})"', r2.text)
-        if match:
-            return match.group(1)
-
-        return "Unknown"
-    except Exception:
-        return "Unknown"
+            return "Unknown"
+        except Exception:
+            return "Unknown"
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -733,29 +723,27 @@ def generate_nftoken(cookie_dict):
         }
     }
 
-    session = get_session()
-
-    try:
-        r = session.post(api_url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
-        if r.status_code == 200:
-            data = r.json()
-            if 'data' in data and data['data'] and 'createAutoLoginToken' in data['data']:
-                token_obj = data['data']['createAutoLoginToken']
-                # token_obj can be a dict with 'tokenValue' or a plain string
-                if isinstance(token_obj, dict):
-                    token_str = token_obj.get('tokenValue') or token_obj.get('token') or token_obj.get('nftoken') or str(token_obj)
+    with _create_session() as session:
+        try:
+            r = session.post(api_url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
+            if r.status_code == 200:
+                data = r.json()
+                if 'data' in data and data['data'] and 'createAutoLoginToken' in data['data']:
+                    token_obj = data['data']['createAutoLoginToken']
+                    if isinstance(token_obj, dict):
+                        token_str = token_obj.get('tokenValue') or token_obj.get('token') or token_obj.get('nftoken') or str(token_obj)
+                    else:
+                        token_str = str(token_obj)
+                    return token_str, None
+                elif 'errors' in data:
+                    err_msg = data['errors'][0].get('message', 'Cookie expired') if data['errors'] else 'Cookie expired'
+                    return None, err_msg
                 else:
-                    token_str = str(token_obj)
-                return token_str, None
-            elif 'errors' in data:
-                err_msg = data['errors'][0].get('message', 'Cookie expired') if data['errors'] else 'Cookie expired'
-                return None, err_msg
+                    return None, "Invalid response"
             else:
-                return None, "Invalid response"
-        else:
-            return None, f"HTTP {r.status_code}"
-    except Exception as e:
-        return None, str(e)
+                return None, f"HTTP {r.status_code}"
+        except Exception as e:
+            return None, str(e)
 
 
 

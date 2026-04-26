@@ -3,5 +3,6 @@ flask-cors>=4.0
 curl_cffi>=0.5
 colorama>=0.4
 gunicorn>=21.0
+waitress>=3.0
 supabase>=2.3.0
 requests>=2.31.0

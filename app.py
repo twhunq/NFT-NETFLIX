@@ -31,37 +31,31 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 def process_cookie(cookie_input, generate_token=True):
     """Process a single cookie and return a comprehensive result dict.
     Mirrors the logic in main.py's process_one() but returns JSON-friendly data.
-
-    Tối ưu hoá: chạy song song các HTTP request không phụ thuộc nhau.
-      Phase A: check_account_info ‖ check_country  (cùng input cookie cơ bản)
-      Phase B: fetch_extra_account_info ‖ generate_nftoken  (cùng cookie_dict đầy đủ)
-    Giảm ~50% thời gian/cookie so với gọi tuần tự.
     """
     netflix_id, secure_id, extras = _parse_cookie_input(cookie_input)
 
     if not netflix_id:
         return {'status': 'ERROR', 'error': 'Could not parse NetflixId from input'}
 
+    # Step 1: Account info
+    info, collected_cookies = check_account_info(netflix_id, secure_id, extra_cookies=extras)
+
     base_cookie_dict = {'NetflixId': netflix_id}
     if secure_id:
         base_cookie_dict['SecureNetflixId'] = secure_id
     base_cookie_dict.update(extras)
 
-    # Phase A: account_info và country chạy song song (chỉ cần netflix_id/secure_id)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        f_info = pool.submit(check_account_info, netflix_id, secure_id, extras)
-        f_country = pool.submit(check_country, netflix_id, secure_id)
-        info, collected_cookies = f_info.result()
-        country = f_country.result()
-
     if info['status'] != 'LIVE':
         return info
 
-    # Build full cookie dict cho Phase B
+    # Step 2: Country
+    country = check_country(netflix_id, secure_id)
+
+    # Step 3: Build full cookie dict
     cookie_dict = dict(base_cookie_dict)
     cookie_dict.update(collected_cookies)
 
-    # Quyết định có cần gọi /browse không
+    # Step 3.5: Extra info from /browse when fields are incomplete
     current_profiles = (
         [p.strip() for p in (info.get("profiles") or "").split(",") if p.strip()]
         if info.get("profiles") not in ("-", "") else []
@@ -76,59 +70,47 @@ def process_cookie(cookie_input, generate_token=True):
         current_num_profiles <= 1 or
         len(current_profiles) <= 1
     )
+    if need_extra:
+        try:
+            extra = fetch_extra_account_info(cookie_dict)
+            for key in ("email", "owner", "profiles", "country",
+                        "membershipStatus", "authURL", "numProfiles"):
+                if info.get(key, "-") == "-" and extra.get(key):
+                    info[key] = extra[key]
+                elif key == "numProfiles" and info.get(key, 0) == 0 and extra.get(key):
+                    info[key] = extra[key]
 
-    # Phase B: extra_info và nftoken chạy song song
-    extra = {}
-    token = None
-    token_error = None
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        f_extra = pool.submit(fetch_extra_account_info, cookie_dict) if need_extra else None
-        f_token = pool.submit(generate_nftoken, cookie_dict) if generate_token else None
+            if extra.get("profiles"):
+                extra_profiles = [p.strip() for p in extra["profiles"].split(",") if p.strip()]
+                cur_p = (
+                    [p.strip() for p in info.get("profiles", "-").split(",") if p.strip()]
+                    if info.get("profiles") not in ("-", "") else []
+                )
+                if info.get("profiles") in ("-", "") or len(extra_profiles) > len(cur_p):
+                    info["profiles"] = extra["profiles"]
 
-        if f_extra is not None:
-            try:
-                extra = f_extra.result() or {}
-            except Exception:
-                extra = {}
+            if extra.get("numProfiles"):
+                info["numProfiles"] = max(
+                    int(info.get("numProfiles", 0) or 0),
+                    int(extra["numProfiles"])
+                )
 
-        if f_token is not None:
-            try:
-                token, token_error = f_token.result()
-            except Exception as e:
-                token, token_error = None, str(e)
+            if info.get("numProfiles", 0) == 0 and extra.get("profiles"):
+                info["numProfiles"] = len(
+                    [p.strip() for p in extra["profiles"].split(",") if p.strip()]
+                )
+        except Exception:
+            pass
 
-    # Merge extra info vào info (giữ nguyên logic cũ)
-    if need_extra and extra:
-        for key in ("email", "owner", "profiles", "country",
-                    "membershipStatus", "authURL", "numProfiles"):
-            if info.get(key, "-") == "-" and extra.get(key):
-                info[key] = extra[key]
-            elif key == "numProfiles" and info.get(key, 0) == 0 and extra.get(key):
-                info[key] = extra[key]
-
-        if extra.get("profiles"):
-            extra_profiles = [p.strip() for p in extra["profiles"].split(",") if p.strip()]
-            cur_p = (
-                [p.strip() for p in info.get("profiles", "-").split(",") if p.strip()]
-                if info.get("profiles") not in ("-", "") else []
-            )
-            if info.get("profiles") in ("-", "") or len(extra_profiles) > len(cur_p):
-                info["profiles"] = extra["profiles"]
-
-        if extra.get("numProfiles"):
-            info["numProfiles"] = max(
-                int(info.get("numProfiles", 0) or 0),
-                int(extra["numProfiles"])
-            )
-
-        if info.get("numProfiles", 0) == 0 and extra.get("profiles"):
-            info["numProfiles"] = len(
-                [p.strip() for p in extra["profiles"].split(",") if p.strip()]
-            )
-
-    # Update country nếu lấy được từ /browse
+    # Update country if available from extra info
     if country in ("Unknown", "-") and info.get("country") not in ("-", "Unknown"):
         country = info["country"]
+
+    # Step 4: NFToken
+    token = None
+    token_error = None
+    if generate_token:
+        token, token_error = generate_nftoken(cookie_dict)
 
     currency = CURRENCY_MAP.get(country, '?')
     membership = info.get('membershipStatus', '-')
@@ -218,13 +200,20 @@ def api_check_bulk():
 
     def generate():
         import time
-        yield f"data: {json.dumps({'type': 'start', 'total': total})}\n\n"
+        gen_start = time.time()
+        print(f"[BULK gen] START total={total}", flush=True)
+        try:
+            yield f"data: {json.dumps({'type': 'start', 'total': total})}\n\n"
+        except (GeneratorExit, BrokenPipeError, ConnectionError) as e:
+            print(f"[BULK gen] CLIENT_DISCONNECT_AT_START err={type(e).__name__}", flush=True)
+            return
 
-        # Số luồng cấu hình qua env BULK_WORKERS (mặc định 5 cho Render free).
+        # Số luồng cấu hình qua env BULK_WORKERS (mặc định 3 — an toàn).
         # Mỗi worker tự song song hoá các HTTP request bên trong process_cookie,
         # nên tổng số request đồng thời tới Netflix ~= BULK_WORKERS * 2.
-        # Tăng quá cao có thể bị Netflix rate-limit theo IP → quan sát tỉ lệ ERROR.
-        max_workers = int(os.environ.get('BULK_WORKERS', '5'))
+        # Tăng cao (>5) dễ bị Netflix rate-limit IP → cookies LIVE bị đánh DEAD oan.
+        # Nếu IP đã "nguội" và muốn nhanh hơn: set env BULK_WORKERS=5-8.
+        max_workers = int(os.environ.get('BULK_WORKERS', '3'))
         workers = min(max_workers, total)
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -239,7 +228,7 @@ def api_check_bulk():
 
             while checked < total:
                 try:
-                    item = result_queue.get(timeout=5)
+                    item = result_queue.get(timeout=2)
                     checked += 1
 
                     status = item['result'].get('status', 'ERROR')
@@ -260,12 +249,20 @@ def api_check_bulk():
                         'index': item['index'],
                         'result': item['result'],
                     }
-                    yield f"data: {json.dumps(event_data)}\n\n"
+                    try:
+                        yield f"data: {json.dumps(event_data)}\n\n"
+                    except (GeneratorExit, BrokenPipeError, ConnectionError) as e:
+                        print(f"[BULK gen] CLIENT_DISCONNECT checked={checked}/{total} err={type(e).__name__}", flush=True)
+                        return
                     last_heartbeat = time.time()
                 except queue.Empty:
-                    # Gửi heartbeat mỗi 15s để Render proxy không ngắt kết nối
-                    if time.time() - last_heartbeat > 15:
-                        yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                    # Heartbeat mỗi 5s.
+                    if time.time() - last_heartbeat > 5:
+                        try:
+                            yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                        except (GeneratorExit, BrokenPipeError, ConnectionError) as e:
+                            print(f"[BULK gen] CLIENT_DISCONNECT_HEARTBEAT checked={checked}/{total} err={type(e).__name__}", flush=True)
+                            return
                         last_heartbeat = time.time()
 
         summary = {
@@ -275,7 +272,12 @@ def api_check_bulk():
             'dead': dead_count,
             'error': error_count,
         }
-        yield f"data: {json.dumps(summary)}\n\n"
+        try:
+            yield f"data: {json.dumps(summary)}\n\n"
+            elapsed = time.time() - gen_start
+            print(f"[BULK gen] COMPLETE checked={checked}/{total} live={live_count} dead={dead_count} err={error_count} elapsed={elapsed:.1f}s", flush=True)
+        except (GeneratorExit, BrokenPipeError, ConnectionError) as e:
+            print(f"[BULK gen] CLIENT_DISCONNECT_FINAL checked={checked}/{total} err={type(e).__name__}", flush=True)
 
     return Response(
         generate(),
@@ -283,7 +285,6 @@ def api_check_bulk():
         headers={
             'Cache-Control': 'no-cache',
             'X-Accel-Buffering': 'no',
-            'Connection': 'keep-alive',
         }
     )
 
@@ -1015,5 +1016,14 @@ def api_mbbank_check():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    # Dùng Waitress thay Werkzeug dev server vì:
+    # - Werkzeug không stream SSE ổn định trên Windows (browser hay nhận
+    #   done=true sớm dù server vẫn còn yield), gây tình trạng "khựng".
+    # - Waitress là production-grade WSGI cho Windows, hỗ trợ SSE đúng.
+    # threads phải >= số SSE connection đồng thời + request thường.
+    from waitress import serve
+    threads = int(os.environ.get('WAITRESS_THREADS', '12'))
+    print(f" * Serving with Waitress on http://0.0.0.0:{port} (threads={threads})", flush=True)
+    serve(app, host='0.0.0.0', port=port, threads=threads,
+          channel_timeout=300, cleanup_interval=30)
 

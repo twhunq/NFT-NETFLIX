@@ -309,8 +309,21 @@
         $('#bulk-prog-fill').style.width = '0%';
         $('#bulk-prog-lbl').textContent = 'Đang xử lý...';
 
+        // Hiển thị cảnh báo khi tab bị Chrome throttle (ẩn) — server vẫn
+        // tiếp tục xử lý nhưng UI có thể chậm cập nhật.
+        let bulkRunning = true;
+        function onVisChange() {
+            if (!bulkRunning) return;
+            if (document.hidden) {
+                $('#bulk-prog-lbl').textContent = 'Đang xử lý nền (tab ẩn — quay lại để xem tiến độ)...';
+            } else {
+                $('#bulk-prog-lbl').textContent = 'Đang xử lý...';
+            }
+        }
+        document.addEventListener('visibilitychange', onVisChange);
+
         let currentBatch = 0;
-        const BATCH_SIZE = 20;
+        const BATCH_SIZE = 30;
         const totalFiles = bulkFiles.length;
         
         let globalChecked = 0;
@@ -320,6 +333,8 @@
 
         function processNextBatch() {
             if (currentBatch * BATCH_SIZE >= totalFiles) {
+                bulkRunning = false;
+                document.removeEventListener('visibilitychange', onVisChange);
                 setLoading('#btn-run-bulk', false);
                 $('#bulk-prog-lbl').textContent = 'Xong';
                 toast(`Đã xử lý xong ${totalFiles} tệp.`, 'success');
