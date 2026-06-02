@@ -405,18 +405,50 @@ def api_storage_save():
         'label': data.get('label', ''),
     }
 
-    # Fetch existing cookies (only ids and cookies text) to check for duplicates
-    url = f"{SUPABASE_URL}/rest/v1/cookies?select=id,cookie"
-    r = requests.get(url, headers=_supabase_headers())
+    # ── DUPLICATE CHECK OPTIMIZATION ──
     existing_id = None
+    email = entry.get('email', '-').strip()
     
-    if r.status_code == 200:
-        existing_list = r.json()
+    # 1. Thử khớp theo email (Mỗi acc Netflix chỉ có 1 email duy nhất)
+    if email and email != '-':
+        import urllib.parse
+        url = f"{SUPABASE_URL}/rest/v1/cookies?email=eq.{urllib.parse.quote(email)}&select=id"
+        r = requests.get(url, headers=_supabase_headers())
+        if r.status_code == 200:
+            existing_list = r.json()
+            if existing_list:
+                existing_id = existing_list[0].get('id')
+
+    # 2. Nếu không khớp theo email, thử khớp theo cookie text chính xác
+    if not existing_id:
         cookie_text = entry['cookie'].strip()
-        for item in existing_list:
-            if item.get('cookie', '').strip() == cookie_text:
-                existing_id = item.get('id')
-                break
+        import urllib.parse
+        if len(cookie_text) < 2000:
+            url = f"{SUPABASE_URL}/rest/v1/cookies?cookie=eq.{urllib.parse.quote(cookie_text)}&select=id"
+            r = requests.get(url, headers=_supabase_headers())
+            if r.status_code == 200:
+                existing_list = r.json()
+                if existing_list:
+                    existing_id = existing_list[0].get('id')
+        else:
+            # Thuật toán phân trang an toàn (Fallback) chỉ khi cookie quá dài và không có email
+            limit = 1000
+            offset = 0
+            while True:
+                url = f"{SUPABASE_URL}/rest/v1/cookies?select=id,cookie&limit={limit}&offset={offset}"
+                r = requests.get(url, headers=_supabase_headers())
+                if r.status_code != 200:
+                    break
+                data = r.json()
+                if not data:
+                    break
+                for item in data:
+                    if item.get('cookie', '').strip() == cookie_text:
+                        existing_id = item.get('id')
+                        break
+                if existing_id or len(data) < limit:
+                    break
+                offset += limit
 
     if existing_id:
         # Update existing
@@ -438,13 +470,21 @@ def api_storage_save():
 @app.route('/api/storage/list', methods=['GET'])
 def api_storage_list():
     """List all stored cookies from Supabase."""
-    url = f"{SUPABASE_URL}/rest/v1/cookies?order=savedAt.desc"
-    r = requests.get(url, headers=_supabase_headers())
-    
-    if r.status_code != 200:
-        return jsonify([])
-
-    storage = r.json()
+    storage = []
+    limit = 1000
+    offset = 0
+    while True:
+        url = f"{SUPABASE_URL}/rest/v1/cookies?order=savedAt.desc&limit={limit}&offset={offset}"
+        r = requests.get(url, headers=_supabase_headers())
+        if r.status_code != 200:
+            break
+        data = r.json()
+        if not data:
+            break
+        storage.extend(data)
+        if len(data) < limit:
+            break
+        offset += limit
     safe_list = []
     for item in storage:
         safe_item = dict(item)
@@ -510,10 +550,21 @@ def api_storage_get_cookie():
 @app.route('/api/storage/export', methods=['GET'])
 def api_storage_export():
     """Export all stored cookies as a ZIP file containing individual .txt files."""
-    url = f"{SUPABASE_URL}/rest/v1/cookies?order=savedAt.desc"
-    r = requests.get(url, headers=_supabase_headers())
-    
-    storage = r.json() if r.status_code == 200 else []
+    storage = []
+    limit = 1000
+    offset = 0
+    while True:
+        url = f"{SUPABASE_URL}/rest/v1/cookies?order=savedAt.desc&limit={limit}&offset={offset}"
+        r = requests.get(url, headers=_supabase_headers())
+        if r.status_code != 200:
+            break
+        data = r.json()
+        if not data:
+            break
+        storage.extend(data)
+        if len(data) < limit:
+            break
+        offset += limit
 
     import zipfile
     import io
@@ -839,13 +890,21 @@ def api_public_list():
             }
         ]
     """
-    url = f"{SUPABASE_URL}/rest/v1/cookies?order=savedAt.desc"
-    r = requests.get(url, headers=_supabase_headers())
-
-    if r.status_code != 200:
-        return jsonify([])
-
-    storage = r.json()
+    storage = []
+    limit = 1000
+    offset = 0
+    while True:
+        url = f"{SUPABASE_URL}/rest/v1/cookies?order=savedAt.desc&limit={limit}&offset={offset}"
+        r = requests.get(url, headers=_supabase_headers())
+        if r.status_code != 200:
+            break
+        data = r.json()
+        if not data:
+            break
+        storage.extend(data)
+        if len(data) < limit:
+            break
+        offset += limit
     safe_list = []
     for item in storage:
         safe_item = dict(item)
